@@ -373,7 +373,7 @@ function createApp(options = {}) {
         }
         const headers = { 'content-type': 'video/webm' };
         if (requestUrl.searchParams.get('download') === '1') {
-          headers['content-disposition'] = `attachment; filename="${encodeURIComponent(fileName)}"`;
+          headers['content-disposition'] = `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
         }
         response.writeHead(200, headers);
         response.end(await fs.readFile(videoPath));
@@ -393,7 +393,8 @@ function createApp(options = {}) {
           sendJson(response, 409, { error: '目標檔名已存在。' });
           return;
         }
-        const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+        const originalMetadataText = await fs.readFile(metadataPath, 'utf8');
+        const metadata = JSON.parse(originalMetadataText);
         metadata.fileName = nextFileName;
         metadata.updatedAt = new Date().toISOString();
         await fs.rename(videoPath, nextVideoPath);
@@ -405,6 +406,14 @@ function createApp(options = {}) {
           await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
         } catch (error) {
           await fs.rename(nextVideoPath, videoPath).catch(() => undefined);
+          if (await fileExists(nextMetadataPath)) {
+            await fs.rename(nextMetadataPath, metadataPath).catch(async () => {
+              await fs.writeFile(metadataPath, originalMetadataText);
+              await fs.rm(nextMetadataPath, { force: true });
+            });
+          } else if (!(await fileExists(metadataPath))) {
+            await fs.writeFile(metadataPath, originalMetadataText).catch(() => undefined);
+          }
           throw error;
         }
         return sendJson(response, 200, {

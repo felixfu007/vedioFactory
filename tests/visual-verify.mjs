@@ -122,7 +122,7 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
     const pageScreenshotPath = path.join(outputDir, `${scenario.name}-page.png`);
     await page.screenshot({ path: pageScreenshotPath, fullPage: true });
 
-    const verification = await page.evaluate(async () => {
+    const verification = await page.evaluate(async (expected) => {
       const once = (target, eventName) => new Promise((resolve) => {
         target.addEventListener(eventName, resolve, { once: true });
       });
@@ -157,7 +157,14 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
       };
 
       const video = document.querySelector('.video-card video');
-      const item = window.VedioFactory.getLibrarySnapshot()[0];
+      const item = window.VedioFactory.getLibrarySnapshot().find((entry) => (
+        entry.moduleId === expected.moduleId
+        && entry.prompt === expected.prompt
+        && entry.story === expected.story
+      ));
+      if (!item) {
+        throw new Error('generated item not found in library snapshot');
+      }
       const targetTime = Math.max(0, Math.min(item.duration / 2, video.duration - 0.1));
 
       if (video.readyState < 2) {
@@ -184,6 +191,10 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
         status: document.querySelector('#generationStatus')?.textContent,
         storageMode: document.querySelector('#storageMode')?.textContent,
       };
+    }, {
+      moduleId: scenario.moduleId,
+      prompt: scenario.prompt,
+      story: scenario.story,
     });
 
     const actualFramePath = path.join(outputDir, `${scenario.name}-frame-actual.png`);
