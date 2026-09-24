@@ -44,6 +44,14 @@ async function main() {
       const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
       assert.match(setupManifestText, new RegExp(manifest.modelId));
     }
+    const setupBatchAgain = await fetch(`${origin}/api/models/setup-batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then((response) => response.json());
+    assert.equal(setupBatchAgain.firstBatchModels.length, 4);
+    assert.equal(new Set(setupBatchAgain.firstBatchModels.map((model) => model.manifestPath)).size, 4);
+    assert.equal(setupBatchAgain.firstBatchModels.some((model, index) => model.manifestPath === setupBatch.firstBatchModels[index].manifestPath), false);
 
     const item = {
       id: 'api-test-id',

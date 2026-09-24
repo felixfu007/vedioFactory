@@ -597,6 +597,14 @@ function createApp(options = {}) {
       if (request.method === 'PATCH') {
         const body = await readJsonBody(request);
         const nextFileName = sanitizeFileName(body.nextFileName);
+        if (nextFileName === fileName) {
+          const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+          return sendJson(response, 200, {
+            ...metadata,
+            fileName,
+            previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
+          });
+        }
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
         if (!(await fileExists(videoPath)) || !(await fileExists(metadataPath))) {

@@ -51,7 +51,9 @@
   }
 
   function serializeLibrary() {
-    const payload = state.library.map(({ previewUrl, blob, ...item }) => item);
+    const payload = state.library
+      .filter((item) => item.storageOrigin !== 'temporary')
+      .map(({ previewUrl, blob, ...item }) => item);
     localStorage.setItem(storageKey, JSON.stringify(payload));
   }
 
@@ -105,6 +107,7 @@
   }
 
   function renderModuleOptions() {
+    const currentValue = ui.moduleSelect.value;
     ui.moduleSelect.innerHTML = '';
     modules.forEach((moduleDefinition) => {
       const option = document.createElement('option');
@@ -113,6 +116,9 @@
       ui.moduleSelect.append(option);
     });
 
+    if (currentValue && modules.some((moduleDefinition) => moduleDefinition.id === currentValue)) {
+      ui.moduleSelect.value = currentValue;
+    }
     ui.moduleCount.textContent = String(modules.length);
     renderModuleDetails();
   }
@@ -411,6 +417,7 @@
 
   async function saveAssetSet(item) {
     if (state.backend.available) {
+      item.storageOrigin = 'backend';
       item.previewUrl = `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`;
       await fetchJson('/api/videos', {
         method: 'POST',
@@ -423,10 +430,12 @@
     }
 
     if (!state.folderHandle) {
+      item.storageOrigin = 'temporary';
       item.previewUrl = URL.createObjectURL(item.blob);
       return item;
     }
 
+    item.storageOrigin = 'folder';
     const videoHandle = await state.folderHandle.getFileHandle(item.fileName, { create: true });
     const metadataHandle = await state.folderHandle.getFileHandle(`${item.fileName}.json`, { create: true });
     await writeFile(videoHandle, item.blob);
@@ -812,6 +821,11 @@
         fileName: nextFileName,
       };
 
+      if (nextFileName === item.fileName) {
+        setStatus(`檔名沒有變更：${nextFileName}`);
+        return;
+      }
+
       if (state.backend.available) {
         await fetchJson(`/api/videos/${encodeURIComponent(item.fileName)}`, {
           method: 'PATCH',
@@ -844,7 +858,7 @@
         return;
       }
 
-      state.library = state.library.map((entry) => (entry.id === item.id ? updated : entry));
+      state.library = state.library.map((entry) => (entry.id === item.id ? { ...updated, previewUrl: entry.previewUrl } : entry));
       serializeLibrary();
       renderLibrary();
       setStatus(`已重新命名為 ${nextFileName}`);
