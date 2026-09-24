@@ -62,6 +62,14 @@ async function main() {
     assert.equal(listed[0].fileName, item.fileName);
     assert.match(listed[0].previewUrl, /\/api\/videos\/api-test\.webm/);
 
+    await fs.writeFile(path.join(managedOutputDir, 'broken.webm.json'), '{');
+    await fs.writeFile(path.join(managedOutputDir, 'orphan.webm.json'), JSON.stringify({
+      ...item,
+      fileName: 'orphan.webm',
+    }, null, 2));
+    const stillListed = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(stillListed.length, 1);
+
     const renamed = await fetch(`${origin}/api/videos/${encodeURIComponent(item.fileName)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
@@ -96,6 +104,11 @@ async function main() {
     const listedJobs = await fetch(`${origin}/api/inference/jobs`).then((response) => response.json());
     assert.equal(listedJobs.length, 1);
     assert.equal(listedJobs[0].id, inferenceJob.id);
+
+    await fs.mkdir(path.join(managedOutputDir, 'inference-jobs'), { recursive: true });
+    await fs.writeFile(path.join(managedOutputDir, 'inference-jobs', 'broken.json'), '{');
+    const listedJobsAfterBroken = await fetch(`${origin}/api/inference/jobs`).then((response) => response.json());
+    assert.equal(listedJobsAfterBroken.length, 1);
 
     const fetchedJob = await fetch(`${origin}/api/inference/jobs/${inferenceJob.id}`).then((response) => response.json());
     assert.equal(fetchedJob.id, inferenceJob.id);

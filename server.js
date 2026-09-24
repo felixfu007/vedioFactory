@@ -385,15 +385,28 @@ function createApp(options = {}) {
         const nextFileName = sanitizeFileName(body.nextFileName);
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
+        if (!(await fileExists(videoPath)) || !(await fileExists(metadataPath))) {
+          sendJson(response, 404, { error: '找不到要重新命名的影片。' });
+          return;
+        }
+        if ((await fileExists(nextVideoPath)) || (await fileExists(nextMetadataPath))) {
+          sendJson(response, 409, { error: '目標檔名已存在。' });
+          return;
+        }
         const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
         metadata.fileName = nextFileName;
         metadata.updatedAt = new Date().toISOString();
         await fs.rename(videoPath, nextVideoPath);
-        await fs.rename(metadataPath, nextMetadataPath).catch(async () => {
+        try {
+          await fs.rename(metadataPath, nextMetadataPath).catch(async () => {
+            await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
+            await fs.rm(metadataPath, { force: true });
+          });
           await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
-          await fs.rm(metadataPath, { force: true });
-        });
-        await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
+        } catch (error) {
+          await fs.rename(nextVideoPath, videoPath).catch(() => undefined);
+          throw error;
+        }
         return sendJson(response, 200, {
           ...metadata,
           previewUrl: `/api/videos/${encodeURIComponent(nextFileName)}`,

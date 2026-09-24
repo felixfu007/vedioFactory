@@ -390,10 +390,14 @@
     const nextLibrary = [];
     for await (const [entryName, entry] of state.folderHandle.entries()) {
       if (entry.kind !== 'file' || !entryName.endsWith('.webm.json')) continue;
-      const file = await entry.getFile();
-      const metadata = JSON.parse(await file.text());
-      metadata.previewUrl = await getPreviewUrl(metadata.fileName);
-      nextLibrary.push(metadata);
+      try {
+        const file = await entry.getFile();
+        const metadata = JSON.parse(await file.text());
+        metadata.previewUrl = await getPreviewUrl(metadata.fileName);
+        nextLibrary.push(metadata);
+      } catch {
+        continue;
+      }
     }
 
     nextLibrary.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
