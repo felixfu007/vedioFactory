@@ -18,6 +18,7 @@
       runtime: null,
       lastJob: null,
     },
+    modelCatalog: null,
   };
 
   const storageKey = 'vedioFactory.library';
@@ -88,6 +89,10 @@
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
+    ui.modelCatalogSummary = document.querySelector('#modelCatalogSummary');
+    ui.modelCatalogGrid = document.querySelector('#modelCatalogGrid');
+    ui.modelCatalogStatus = document.querySelector('#modelCatalogStatus');
+    ui.setupModelBatchButton = document.querySelector('#setupModelBatchButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
   }
 
@@ -143,6 +148,10 @@
     ui.inferenceStatus.textContent = message;
   }
 
+  function setModelCatalogStatus(message) {
+    ui.modelCatalogStatus.textContent = message;
+  }
+
   function syncStorageUi() {
     if (state.backend.available) {
       ui.storageMode.textContent = '後端資料夾';
@@ -190,6 +199,55 @@
       list.append(item);
     });
     ui.inferenceRuntime.append(list);
+  }
+
+  function renderModelCatalog() {
+    const catalog = state.modelCatalog;
+    ui.modelCatalogGrid.innerHTML = '';
+
+    if (!catalog) {
+      ui.modelCatalogSummary.hidden = false;
+      ui.modelCatalogSummary.textContent = '尚未取得模型規劃資料。';
+      ui.setupModelBatchButton.disabled = true;
+      return;
+    }
+
+    ui.setupModelBatchButton.disabled = false;
+    ui.modelCatalogSummary.hidden = false;
+    ui.modelCatalogSummary.textContent = `目前真正已整合的 AI 模型數量：${catalog.currentProjectStatus.actualIntegratedModels.length}；建議首批整合順序：${catalog.firstBatchOrder.join(' → ')}`;
+
+    catalog.models.forEach((model) => {
+      const card = document.createElement('article');
+      card.className = 'catalog-card';
+
+      const title = document.createElement('h3');
+      title.textContent = model.name;
+      const note = document.createElement('p');
+      note.className = 'video-subtitle';
+      note.textContent = model.notes;
+      const installPath = document.createElement('p');
+      installPath.className = 'summary';
+      installPath.textContent = `安裝目錄：${model.installPath}`;
+
+      const chips = document.createElement('div');
+      chips.className = 'catalog-chip-row';
+      [model.category, model.batch, model.status, model.windowsProfile?.vramHint].filter(Boolean).forEach((value) => {
+        const chip = document.createElement('span');
+        chip.className = 'catalog-chip';
+        chip.textContent = value;
+        chips.append(chip);
+      });
+
+      const list = document.createElement('ul');
+      model.bestFor.forEach((value) => {
+        const entry = document.createElement('li');
+        entry.textContent = value;
+        list.append(entry);
+      });
+
+      card.append(title, note, chips, installPath, list);
+      ui.modelCatalogGrid.append(card);
+    });
   }
 
   function setGeneratingState(isGenerating) {
@@ -570,6 +628,7 @@
       state.folderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       syncStorageUi();
       renderInferenceRuntime();
+      ui.setupModelBatchButton.disabled = true;
       await listFolderItems();
       renderLibrary();
       setStatus(`已連線到資料夾：${state.folderHandle.name}`);
@@ -599,9 +658,11 @@
       state.folderHandle = null;
       state.library = payload.items;
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
+      state.modelCatalog = await fetchJson('/api/models/catalog', { headers: {} });
       syncStorageUi();
       serializeLibrary();
       renderInferenceRuntime();
+      renderModelCatalog();
       renderLibrary();
       setStatus(`已套用後端資料夾：${payload.outputDir}`);
     } catch (error) {
@@ -618,11 +679,13 @@
       state.folderHandle = null;
       await listFolderItems();
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
+      state.modelCatalog = await fetchJson('/api/models/catalog', { headers: {} });
     } catch (error) {
       console.warn('Backend unavailable, falling back to browser mode.', error);
     } finally {
       syncStorageUi();
       renderInferenceRuntime();
+      renderModelCatalog();
     }
   }
 
@@ -664,6 +727,24 @@
     } catch (error) {
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
+    }
+  }
+
+  async function setupModelBatch() {
+    try {
+      if (!state.backend.available) {
+        setModelCatalogStatus('目前未連線到本機後端，無法建立模型整合清單。');
+        return;
+      }
+
+      const payload = await fetchJson('/api/models/setup-batch', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setModelCatalogStatus(`已建立 ${payload.firstBatchModels.length} 個首批模型整合 manifest，安裝根目錄：${payload.installRoot}`);
+    } catch (error) {
+      console.error(error);
+      setModelCatalogStatus(`建立模型整合清單失敗：${error.message}`);
     }
   }
 
@@ -936,6 +1017,7 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
   }
 
   async function initApp() {

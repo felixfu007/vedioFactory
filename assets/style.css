@@ -193,6 +193,29 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
+.catalog-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(151, 171, 196, 0.14);
+  border-radius: 22px;
+  padding: 1rem;
+  background: rgba(6, 16, 28, 0.72);
+}
+
+.catalog-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.catalog-chip {
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(91, 140, 255, 0.14);
+  color: var(--primary-strong);
+  font-size: 0.82rem;
+}
+
 .video-card {
   display: grid;
   gap: 1rem;

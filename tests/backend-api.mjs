@@ -28,6 +28,21 @@ async function main() {
     assert.equal(runtime.outputDir, managedOutputDir);
     assert.ok(Array.isArray(runtime.guidance));
 
+    const catalog = await fetch(`${origin}/api/models/catalog`).then((response) => response.json());
+    assert.equal(catalog.currentProjectStatus.actualIntegratedModels.length, 0);
+    assert.deepEqual(catalog.firstBatchOrder, ['sdxl', 'animatediff', 'realesrgan', 'rife']);
+    assert.equal(catalog.models.some((model) => model.id === 'sdxl'), true);
+
+    const setupBatch = await fetch(`${origin}/api/models/setup-batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then((response) => response.json());
+    assert.equal(setupBatch.firstBatchModels.length, 4);
+    assert.equal(setupBatch.firstBatchModels[0].modelId, 'sdxl');
+    const setupManifestText = await fs.readFile(setupBatch.firstBatchModels[0].manifestPath, 'utf8');
+    assert.match(setupManifestText, /sdxl/);
+
     const item = {
       id: 'api-test-id',
       fileName: 'api-test.webm',

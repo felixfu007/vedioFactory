@@ -17,6 +17,130 @@ const DEFAULT_MODEL_DIR = path.resolve(
 );
 const MAX_JSON_BODY = 80 * 1024 * 1024;
 const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
+const MODEL_SETUP_DIR_NAME = 'model-setup';
+
+const MODEL_CATALOG = [
+  {
+    id: 'sdxl',
+    name: 'SDXL',
+    category: 'image-generation',
+    batch: 'first-wave',
+    status: 'scaffolded',
+    priority: 1,
+    recommended: true,
+    bestFor: ['文生圖', '圖生圖', 'ControlNet 擴充'],
+    notes: '作為首幀、關鍵影格與風格基底模型。',
+    windowsProfile: {
+      runtime: 'ComfyUI / ONNX / Diffusers',
+      vramHint: '建議 8GB+ VRAM',
+    },
+  },
+  {
+    id: 'animatediff',
+    name: 'AnimateDiff',
+    category: 'image-to-video',
+    batch: 'first-wave',
+    status: 'scaffolded',
+    priority: 2,
+    recommended: true,
+    bestFor: ['照片轉短片', '鏡頭微動態', '角色動畫延展'],
+    notes: '承接 SDXL 或 SD 影像輸出，補上短片運動能力。',
+    windowsProfile: {
+      runtime: 'ComfyUI / Diffusers',
+      vramHint: '建議 10GB+ VRAM',
+    },
+  },
+  {
+    id: 'realesrgan',
+    name: 'Real-ESRGAN',
+    category: 'upscaling',
+    batch: 'first-wave',
+    status: 'scaffolded',
+    priority: 3,
+    recommended: true,
+    bestFor: ['放大', '修復細節', '輸出畫質增強'],
+    notes: '作為影片與單張影格後處理。',
+    windowsProfile: {
+      runtime: 'NCNN / PyTorch',
+      vramHint: '建議 4GB+ VRAM',
+    },
+  },
+  {
+    id: 'rife',
+    name: 'RIFE',
+    category: 'frame-interpolation',
+    batch: 'first-wave',
+    status: 'scaffolded',
+    priority: 4,
+    recommended: true,
+    bestFor: ['補幀', '提昇流暢度', '延長片段'],
+    notes: '搭配 AnimateDiff 或既有影片片段提高 FPS。',
+    windowsProfile: {
+      runtime: 'NCNN / PyTorch',
+      vramHint: '建議 6GB+ VRAM',
+    },
+  },
+  {
+    id: 'wan-2.1',
+    name: 'Wan 2.1',
+    category: 'video-generation',
+    batch: 'advanced',
+    status: 'planned',
+    priority: 5,
+    recommended: true,
+    bestFor: ['高品質文生影片', '圖生影片'],
+    notes: '適合正式導入為主力影片模型。',
+    windowsProfile: {
+      runtime: 'ComfyUI / Python pipeline',
+      vramHint: '建議 12GB+ VRAM',
+    },
+  },
+  {
+    id: 'cogvideox',
+    name: 'CogVideoX',
+    category: 'video-generation',
+    batch: 'advanced',
+    status: 'planned',
+    priority: 6,
+    recommended: true,
+    bestFor: ['文生影片', '長鏡頭生成'],
+    notes: '可作為 Wan 2.1 之外的另一條主力影片路線。',
+    windowsProfile: {
+      runtime: 'Python pipeline',
+      vramHint: '建議 12GB+ VRAM',
+    },
+  },
+  {
+    id: 'controlnet',
+    name: 'ControlNet',
+    category: 'conditioning',
+    batch: 'advanced',
+    status: 'planned',
+    priority: 7,
+    recommended: true,
+    bestFor: ['姿勢控制', '構圖控制', '邊緣控制'],
+    notes: '通常與 SDXL / FLUX 搭配。',
+    windowsProfile: {
+      runtime: 'ComfyUI / Diffusers',
+      vramHint: '依主模型而定',
+    },
+  },
+  {
+    id: 'ip-adapter',
+    name: 'IP-Adapter',
+    category: 'conditioning',
+    batch: 'advanced',
+    status: 'planned',
+    priority: 8,
+    recommended: true,
+    bestFor: ['參考圖一致性', '人物產品特徵保持'],
+    notes: '很適合照片導向工作流。',
+    windowsProfile: {
+      runtime: 'ComfyUI / Diffusers',
+      vramHint: '依主模型而定',
+    },
+  },
+];
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -191,6 +315,38 @@ async function getInferenceRuntime(outputDir) {
   };
 }
 
+function getCurrentProjectModelStatus() {
+  return {
+    actualIntegratedModels: [],
+    visualModules: [
+      { id: 'cinematic-motion', type: 'canvas-module' },
+      { id: 'storyboard-focus', type: 'canvas-module' },
+      { id: 'neon-pulse', type: 'canvas-module' },
+    ],
+    inferenceScaffold: {
+      provider: 'local-nvidia-cuda',
+      hasRuntimeDetection: true,
+      hasJobManifestPersistence: true,
+      hasRealModelExecution: false,
+    },
+  };
+}
+
+function buildModelCatalog(modelDir) {
+  return {
+    generatedAt: new Date().toISOString(),
+    currentProjectStatus: getCurrentProjectModelStatus(),
+    installRoot: modelDir,
+    firstBatchOrder: MODEL_CATALOG.filter((model) => model.batch === 'first-wave')
+      .sort((left, right) => left.priority - right.priority)
+      .map((model) => model.id),
+    models: MODEL_CATALOG.map((model) => ({
+      ...model,
+      installPath: path.join(modelDir, model.id),
+    })),
+  };
+}
+
 async function collectVideoItems(outputDir) {
   await fs.mkdir(outputDir, { recursive: true });
   const entries = await fs.readdir(outputDir, { withFileTypes: true });
@@ -231,6 +387,10 @@ function createApp(options = {}) {
     await fs.mkdir(path.join(outputDir, INFERENCE_JOBS_DIR_NAME), { recursive: true });
   }
 
+  async function ensureModelSetupDir() {
+    await fs.mkdir(path.join(outputDir, MODEL_SETUP_DIR_NAME), { recursive: true });
+  }
+
   async function listInferenceJobs() {
     await ensureInferenceJobDir();
     const jobsDir = path.join(outputDir, INFERENCE_JOBS_DIR_NAME);
@@ -252,6 +412,39 @@ function createApp(options = {}) {
   async function getInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     return jobs.find((item) => item.id === jobId) || null;
+  }
+
+  async function createModelSetupBatch() {
+    await ensureOutputDir();
+    await ensureModelSetupDir();
+    const runtime = await getInferenceRuntime(outputDir);
+    const catalog = buildModelCatalog(runtime.modelDir);
+    const manifests = [];
+
+    for (const model of catalog.models.filter((item) => item.batch === 'first-wave')) {
+      const manifest = {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        modelId: model.id,
+        name: model.name,
+        category: model.category,
+        installPath: model.installPath,
+        provider: runtime.provider,
+        status: 'scaffolded',
+        nextAction: '準備模型權重、推論節點與本機命令整合',
+        recommendedFor: model.bestFor,
+      };
+      const manifestPath = path.join(outputDir, MODEL_SETUP_DIR_NAME, `${Date.now()}-${model.id}.json`);
+      await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, manifestPath }, null, 2));
+      manifests.push({ ...manifest, manifestPath });
+    }
+
+    return {
+      provider: runtime.provider,
+      outputDir,
+      installRoot: catalog.installRoot,
+      firstBatchModels: manifests,
+    };
   }
 
   async function saveVideoAsset(item, videoBase64) {
@@ -327,6 +520,15 @@ function createApp(options = {}) {
     if (requestUrl.pathname === '/api/inference/runtime' && request.method === 'GET') {
       await ensureOutputDir();
       return sendJson(response, 200, await getInferenceRuntime(outputDir));
+    }
+
+    if (requestUrl.pathname === '/api/models/catalog' && request.method === 'GET') {
+      const runtime = await getInferenceRuntime(outputDir);
+      return sendJson(response, 200, buildModelCatalog(runtime.modelDir));
+    }
+
+    if (requestUrl.pathname === '/api/models/setup-batch' && request.method === 'POST') {
+      return sendJson(response, 201, await createModelSetupBatch());
     }
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'GET') {
