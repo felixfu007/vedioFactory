@@ -646,6 +646,37 @@
     }
   }
 
+  function getLibrarySnapshot() {
+    return state.library.map((item) => ({ ...item }));
+  }
+
+  async function renderReferenceFrame(item, timestamp = item.duration / 2) {
+    const moduleDefinition = getModuleById(item.moduleId);
+    if (!moduleDefinition) {
+      throw new Error(`找不到模組：${item.moduleId}`);
+    }
+
+    const image = await loadImage(item.sourceImageDataUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = item.width;
+    canvas.height = item.height;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const safeTimestamp = Math.max(0, Math.min(timestamp, item.duration || timestamp));
+    const progress = item.duration > 0 ? safeTimestamp / item.duration : 0;
+
+    moduleDefinition.renderFrame({
+      ctx,
+      canvas,
+      progress,
+      image,
+      spec: item,
+      fitImage,
+      drawCaptionBlock,
+    });
+
+    return canvas.toDataURL('image/png');
+  }
+
   function restoreStoredLibraryPreview() {
     state.library = state.library.map((item) => ({
       ...item,
@@ -672,6 +703,9 @@
   window.VedioFactory = {
     registerModule,
     initApp,
+    getModuleById,
+    getLibrarySnapshot,
+    renderReferenceFrame,
   };
 
   document.addEventListener('DOMContentLoaded', () => {

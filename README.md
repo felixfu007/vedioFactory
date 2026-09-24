@@ -28,6 +28,23 @@ python3 -m http.server 8000
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
+## 視覺驗證
+
+安裝測試依賴後可直接跑實際瀏覽器驗證：
+
+```bash
+cd /home/runner/work/vedioFactory/vedioFactory
+npm install
+npm run test:visual
+```
+
+此流程會：
+
+- 啟動本機靜態站點
+- 用 Chromium 實際生成影片
+- 輸出頁面截圖與影片中段畫面截圖到 `visual-output/`
+- 將影片實際畫面與同設定下的參考畫面做相似度比對，確認生成內容與提示詞/描述一致
+
 ## 模組擴充
 
 前端核心註冊器位於 `assets/app.js`，內建模組位於 `assets/modules.js`。
