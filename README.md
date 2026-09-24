@@ -14,7 +14,7 @@
 ### 必要條件
 
 - Windows 11
-- Node.js 18+（建議 LTS）
+- Node.js 22 LTS 或更新
 - Chrome 或 Edge（用於最佳 WebM / MediaRecorder 相容性）
 
 ### 本機 NVIDIA / CUDA 建議環境

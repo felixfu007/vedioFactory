@@ -100,8 +100,22 @@ async function main() {
     const fetchedJob = await fetch(`${origin}/api/inference/jobs/${inferenceJob.id}`).then((response) => response.json());
     assert.equal(fetchedJob.id, inferenceJob.id);
 
+    const missingJobResponse = await fetch(`${origin}/api/inference/jobs/not-found`);
+    assert.equal(missingJobResponse.status, 404);
+    const missingJob = await missingJobResponse.json();
+    assert.match(missingJob.error, /找不到推論工作/);
+
     const manifestText = await fs.readFile(inferenceJob.manifestPath, 'utf8');
     assert.match(manifestText, /local-nvidia-cuda/);
+
+    const malformedJsonResponse = await fetch(`${origin}/api/inference/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"prompt": ',
+    });
+    assert.equal(malformedJsonResponse.status, 400);
+    const malformedJson = await malformedJsonResponse.json();
+    assert.match(malformedJson.error, /JSON 格式錯誤/);
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);

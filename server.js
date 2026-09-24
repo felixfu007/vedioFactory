@@ -192,6 +192,7 @@ async function collectVideoItems(outputDir) {
     const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
     const fileName = sanitizeFileName(metadata.fileName || entry.name.replace(/\.json$/u, ''));
     const videoPath = path.join(outputDir, fileName);
+    if (!(await fileExists(videoPath))) continue;
     const stats = await fs.stat(videoPath);
     items.push({
       ...metadata,

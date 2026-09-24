@@ -664,7 +664,7 @@
 
   async function refreshLibrary() {
     try {
-      if (state.folderHandle) {
+      if (state.backend.available || state.folderHandle) {
         await listFolderItems();
       }
       renderLibrary();
