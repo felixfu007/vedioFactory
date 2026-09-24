@@ -401,23 +401,28 @@ function createApp(options = {}) {
     await fs.mkdir(path.join(outputDir, MODEL_SETUP_DIR_NAME), { recursive: true });
   }
 
-  async function withRenameLock(lockKey, operation) {
-    const previous = renameLocks.get(lockKey) || Promise.resolve();
+  async function withRenameLocks(lockKeys, operation) {
+    const normalizedKeys = [...new Set(lockKeys)].sort();
+    const previousLocks = normalizedKeys.map((lockKey) => renameLocks.get(lockKey) || Promise.resolve());
     let release;
     const current = new Promise((resolve) => {
       release = resolve;
     });
-    renameLocks.set(lockKey, previous.then(() => current));
+    normalizedKeys.forEach((lockKey, index) => {
+      renameLocks.set(lockKey, previousLocks[index].then(() => current));
+    });
 
-    await previous;
+    await Promise.all(previousLocks);
     try {
       return await operation();
     } finally {
       release();
-      if (renameLocks.get(lockKey) === current) {
-        renameLocks.delete(lockKey);
-      }
-    }
+      normalizedKeys.forEach((lockKey) => {
+        if (renameLocks.get(lockKey) === current) {
+          renameLocks.delete(lockKey);
+        }
+      });
+    } 
   }
 
   async function listInferenceJobs() {
@@ -628,7 +633,7 @@ function createApp(options = {}) {
         const nextFileName = sanitizeFileName(body.nextFileName);
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
-        return withRenameLock(fileName, async () => {
+        return withRenameLocks([fileName, nextFileName], async () => {
           if (!(await fileExists(videoPath)) || !(await fileExists(metadataPath))) {
             sendJson(response, 404, { error: '找不到要重新命名的影片。' });
             return;

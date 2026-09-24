@@ -52,7 +52,7 @@
 
   function serializeLibrary() {
     const payload = state.library
-      .filter((item) => item.storageOrigin !== 'temporary')
+      .filter((item) => item.storageOrigin === 'backend')
       .map(({ previewUrl, blob, ...item }) => item);
     localStorage.setItem(storageKey, JSON.stringify(payload));
   }
@@ -61,7 +61,7 @@
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
       state.library = Array.isArray(saved)
-        ? saved.filter((item) => item?.storageOrigin !== 'temporary')
+        ? saved.filter((item) => item?.storageOrigin === 'backend' && item?.fileName)
         : [];
     } catch (error) {
       console.warn('Unable to restore library.', error);
@@ -505,6 +505,8 @@
       const startInput = fragment.querySelector('[data-role="clip-start"]');
       const endInput = fragment.querySelector('[data-role="clip-end"]');
 
+      card.dataset.itemId = item.id;
+      card.dataset.fileName = item.fileName;
       video.src = item.previewUrl ?? '';
       title.textContent = item.fileName;
       subtitle.textContent = `${item.moduleName} ・ ${new Date(item.createdAt).toLocaleString('zh-TW')}`;
@@ -818,7 +820,12 @@
     try {
       const requested = window.prompt('請輸入新的檔名', item.fileName.replace(/\.webm$/u, ''));
       if (!requested) return;
-      const nextFileName = `${requested.replace(/\.webm$/u, '')}.webm`;
+      const normalizedName = requested.trim().replace(/\.webm$/u, '');
+      if (!normalizedName) {
+        setStatus('請輸入有效的檔名。');
+        return;
+      }
+      const nextFileName = `${normalizedName}.webm`;
       const updated = {
         ...item,
         fileName: nextFileName,
@@ -1039,7 +1046,7 @@
   function restoreStoredLibraryPreview() {
     state.library = state.library.map((item) => ({
       ...item,
-      previewUrl: item.previewUrl ?? '',
+      previewUrl: `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`,
     }));
   }
 

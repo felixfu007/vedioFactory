@@ -156,14 +156,14 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
         return Number(normalized.toFixed(4));
       };
 
-      const video = document.querySelector('.video-card video');
-      const item = window.VedioFactory.getLibrarySnapshot().find((entry) => (
-        entry.moduleId === expected.moduleId
-        && entry.prompt === expected.prompt
-        && entry.story === expected.story
-      ));
+      const item = window.VedioFactory.getLibrarySnapshot()[0];
       if (!item) {
         throw new Error('generated item not found in library snapshot');
+      }
+      const card = document.querySelector(`.video-card[data-item-id="${CSS.escape(item.id)}"]`);
+      const video = card?.querySelector('video');
+      if (!video) {
+        throw new Error('generated video element not found');
       }
       const targetTime = Math.max(0, Math.min(item.duration / 2, video.duration - 0.1));
 

@@ -124,6 +124,38 @@ async function main() {
     const videoPayload = await fetch(`${origin}/api/videos/${encodeURIComponent('api-test-renamed.webm')}`).then((response) => response.arrayBuffer());
     assert.equal(Buffer.from(videoPayload).toString('utf8'), 'fake-webm-content');
 
+    const collisionItems = ['rename-left.webm', 'rename-right.webm'];
+    await Promise.all(collisionItems.map((fileName) => fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        item: {
+          ...item,
+          id: fileName,
+          fileName,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        videoBase64: Buffer.from(fileName).toString('base64'),
+      }),
+    })));
+    const renameRaceResponses = await Promise.all(collisionItems.map((fileName) => fetch(`${origin}/api/videos/${encodeURIComponent(fileName)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nextFileName: 'rename-shared.webm' }),
+    })));
+    const renameRaceStatuses = renameRaceResponses.map((response) => response.status).sort();
+    assert.deepEqual(renameRaceStatuses, [200, 409]);
+    const listedAfterRace = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(listedAfterRace.filter((entry) => entry.fileName === 'rename-shared.webm').length, 1);
+    await Promise.all([
+      'rename-left.webm',
+      'rename-right.webm',
+      'rename-shared.webm',
+    ].map((fileName) => fetch(`${origin}/api/videos/${encodeURIComponent(fileName)}`, {
+      method: 'DELETE',
+    })));
+
     const deleted = await fetch(`${origin}/api/videos/${encodeURIComponent('api-test-renamed.webm')}`, {
       method: 'DELETE',
     }).then((response) => response.json());
