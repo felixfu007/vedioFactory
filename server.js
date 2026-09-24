@@ -121,13 +121,23 @@ function execFileAsync(command, args, options = {}) {
 }
 
 function getLocalEngineConfig() {
+  let args = [];
+  if (process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS) {
+    try {
+      const parsed = JSON.parse(process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS);
+      if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
+        throw new Error('invalid args');
+      }
+      args = parsed;
+    } catch {
+      args = [process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS];
+    }
+  }
+
   return {
     provider: 'local-nvidia-cuda',
     command: process.env.VEDIO_FACTORY_LOCAL_ENGINE_COMMAND || '',
-    args: (process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS || '')
-      .split(/\s+/u)
-      .map((item) => item.trim())
-      .filter(Boolean),
+    args,
     modelDir: DEFAULT_MODEL_DIR,
   };
 }

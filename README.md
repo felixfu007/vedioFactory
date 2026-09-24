@@ -14,7 +14,7 @@
 ### 必要條件
 
 - Windows 11
-- Node.js 22 LTS 或更新
+- Node.js 22.12+（建議最新 LTS）
 - Chrome 或 Edge（用於最佳 WebM / MediaRecorder 相容性）
 
 ### 本機 NVIDIA / CUDA 建議環境
@@ -80,7 +80,7 @@ npm start
 $env:VEDIO_FACTORY_OUTPUT_DIR="C:\AI\vedioFactory\output"
 $env:VEDIO_FACTORY_MODEL_DIR="C:\AI\vedioFactory\models"
 $env:VEDIO_FACTORY_LOCAL_ENGINE_COMMAND="python"
-$env:VEDIO_FACTORY_LOCAL_ENGINE_ARGS=".\local-ai\run_inference.py --device cuda"
+$env:VEDIO_FACTORY_LOCAL_ENGINE_ARGS='[".\\local-ai\\run_inference.py","--device","cuda"]'
 npm start
 ```
 

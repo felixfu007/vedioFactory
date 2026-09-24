@@ -14,6 +14,9 @@
     "type": "git",
     "url": "http://localhost:26831/felixfu007/vedioFactory"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

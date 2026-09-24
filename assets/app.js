@@ -269,14 +269,15 @@
   }
 
   function wrapText(ctx, text, maxWidth) {
-    const words = /\s/u.test(text) ? text.split(/\s+/u).filter(Boolean) : Array.from(text);
+    const splitByWhitespace = /\s/u.test(text);
+    const words = splitByWhitespace ? text.split(/\s+/u).filter(Boolean) : Array.from(text);
     if (!words.length) return [''];
 
     const lines = [];
     let current = words.shift() ?? '';
 
     words.forEach((word) => {
-      const candidate = `${current} ${word}`;
+      const candidate = splitByWhitespace ? `${current} ${word}` : `${current}${word}`;
       if (ctx.measureText(candidate).width > maxWidth) {
         lines.push(current);
         current = word;
