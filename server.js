@@ -387,6 +387,7 @@ async function collectVideoItems(outputDir) {
 
 function createApp(options = {}) {
   let outputDir = normalizeOutputDir(options.outputDir || DEFAULT_OUTPUT_DIR);
+  const renameLocks = new Map();
 
   async function ensureOutputDir() {
     await fs.mkdir(outputDir, { recursive: true });
@@ -398,6 +399,25 @@ function createApp(options = {}) {
 
   async function ensureModelSetupDir() {
     await fs.mkdir(path.join(outputDir, MODEL_SETUP_DIR_NAME), { recursive: true });
+  }
+
+  async function withRenameLock(lockKey, operation) {
+    const previous = renameLocks.get(lockKey) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    renameLocks.set(lockKey, previous.then(() => current));
+
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (renameLocks.get(lockKey) === current) {
+        renameLocks.delete(lockKey);
+      }
+    }
   }
 
   async function listInferenceJobs() {
@@ -606,50 +626,52 @@ function createApp(options = {}) {
       if (request.method === 'PATCH') {
         const body = await readJsonBody(request);
         const nextFileName = sanitizeFileName(body.nextFileName);
-        if (nextFileName === fileName) {
-          const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-          return sendJson(response, 200, {
-            ...metadata,
-            fileName,
-            previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
-          });
-        }
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
-        if (!(await fileExists(videoPath)) || !(await fileExists(metadataPath))) {
-          sendJson(response, 404, { error: '找不到要重新命名的影片。' });
-          return;
-        }
-        if ((await fileExists(nextVideoPath)) || (await fileExists(nextMetadataPath))) {
-          sendJson(response, 409, { error: '目標檔名已存在。' });
-          return;
-        }
-        const originalMetadataText = await fs.readFile(metadataPath, 'utf8');
-        const metadata = JSON.parse(originalMetadataText);
-        metadata.fileName = nextFileName;
-        metadata.updatedAt = new Date().toISOString();
-        await fs.rename(videoPath, nextVideoPath);
-        try {
-          await fs.rename(metadataPath, nextMetadataPath).catch(async () => {
-            await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
-            await fs.rm(metadataPath, { force: true });
-          });
-          await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
-        } catch (error) {
-          await fs.rename(nextVideoPath, videoPath).catch(() => undefined);
-          if (await fileExists(nextMetadataPath)) {
-            await fs.rename(nextMetadataPath, metadataPath).catch(async () => {
-              await fs.writeFile(metadataPath, originalMetadataText);
-              await fs.rm(nextMetadataPath, { force: true });
-            });
-          } else if (!(await fileExists(metadataPath))) {
-            await fs.writeFile(metadataPath, originalMetadataText).catch(() => undefined);
+        return withRenameLock(fileName, async () => {
+          if (!(await fileExists(videoPath)) || !(await fileExists(metadataPath))) {
+            sendJson(response, 404, { error: '找不到要重新命名的影片。' });
+            return;
           }
-          throw error;
-        }
-        return sendJson(response, 200, {
-          ...metadata,
-          previewUrl: `/api/videos/${encodeURIComponent(nextFileName)}`,
+          if (nextFileName === fileName) {
+            const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+            return sendJson(response, 200, {
+              ...metadata,
+              fileName,
+              previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
+            });
+          }
+          if ((await fileExists(nextVideoPath)) || (await fileExists(nextMetadataPath))) {
+            sendJson(response, 409, { error: '目標檔名已存在。' });
+            return;
+          }
+          const originalMetadataText = await fs.readFile(metadataPath, 'utf8');
+          const metadata = JSON.parse(originalMetadataText);
+          metadata.fileName = nextFileName;
+          metadata.updatedAt = new Date().toISOString();
+          await fs.rename(videoPath, nextVideoPath);
+          try {
+            await fs.rename(metadataPath, nextMetadataPath).catch(async () => {
+              await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
+              await fs.rm(metadataPath, { force: true });
+            });
+            await fs.writeFile(nextMetadataPath, JSON.stringify(metadata, null, 2));
+          } catch (error) {
+            await fs.rename(nextVideoPath, videoPath).catch(() => undefined);
+            if (await fileExists(nextMetadataPath)) {
+              await fs.rename(nextMetadataPath, metadataPath).catch(async () => {
+                await fs.writeFile(metadataPath, originalMetadataText);
+                await fs.rm(nextMetadataPath, { force: true });
+              });
+            } else if (!(await fileExists(metadataPath))) {
+              await fs.writeFile(metadataPath, originalMetadataText).catch(() => undefined);
+            }
+            throw error;
+          }
+          return sendJson(response, 200, {
+            ...metadata,
+            previewUrl: `/api/videos/${encodeURIComponent(nextFileName)}`,
+          });
         });
       }
 

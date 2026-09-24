@@ -57,6 +57,20 @@ async function main() {
     assert.equal(setupBatchAgain.firstBatchModels.length, 4);
     assert.equal(new Set(setupBatchAgain.firstBatchModels.map((model) => model.manifestPath)).size, 4);
     assert.equal(setupBatchAgain.firstBatchModels.some((model, index) => model.manifestPath === setupBatch.firstBatchModels[index].manifestPath), false);
+    const concurrentBatches = await Promise.all([
+      fetch(`${origin}/api/models/setup-batch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then((response) => response.json()),
+      fetch(`${origin}/api/models/setup-batch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then((response) => response.json()),
+    ]);
+    const concurrentManifestPaths = concurrentBatches.flatMap((batch) => batch.firstBatchModels.map((model) => model.manifestPath));
+    assert.equal(new Set(concurrentManifestPaths).size, 8);
 
     const item = {
       id: 'api-test-id',

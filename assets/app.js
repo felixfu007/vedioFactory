@@ -60,7 +60,9 @@
   function loadStoredLibrary() {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
-      state.library = Array.isArray(saved) ? saved : [];
+      state.library = Array.isArray(saved)
+        ? saved.filter((item) => item?.storageOrigin !== 'temporary')
+        : [];
     } catch (error) {
       console.warn('Unable to restore library.', error);
       state.library = [];
