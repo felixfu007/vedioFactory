@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vedioFactory | 本機 AI 影片工作台</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero card">
+        <div>
+          <p class="eyebrow">Local-first AI video studio</p>
+          <h1>vedioFactory 本機 AI 影片生成服務</h1>
+          <p class="hero-copy">
+            匯入照片搭配提示詞，或直接輸入影片描述，就能用可替換的模組快速生成影片，並把成果保存在你指定的本機資料夾。
+          </p>
+        </div>
+        <div class="hero-status">
+          <div>
+            <span class="status-label">輸出資料夾</span>
+            <strong id="folderName">尚未選擇</strong>
+          </div>
+          <div>
+            <span class="status-label">儲存模式</span>
+            <strong id="storageMode">瀏覽器暫存</strong>
+          </div>
+          <div>
+            <span class="status-label">已註冊模組</span>
+            <strong id="moduleCount">0</strong>
+          </div>
+          <div>
+            <span class="status-label">本機 GPU 推論</span>
+            <strong id="gpuStatus">檢查中</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="card controls-grid">
+        <div class="panel">
+          <h2>1. 選擇輸入素材</h2>
+          <label>
+            照片（選填）
+            <input id="imageInput" type="file" accept="image/*" />
+          </label>
+          <label>
+            提示詞
+            <textarea id="promptInput" rows="4" placeholder="例如：讓人物在霓虹夜景中緩慢轉身，營造電影預告感"></textarea>
+          </label>
+          <label>
+            影片描述
+            <textarea id="storyInput" rows="5" placeholder="例如：一段 8 秒短片，從照片中的主體推進到特寫，最後停留在品牌標語。"></textarea>
+          </label>
+        </div>
+
+        <div class="panel">
+          <h2>2. 切換生成模組</h2>
+          <label>
+            後端輸出資料夾（絕對路徑）
+            <input
+              id="outputDirInput"
+              type="text"
+              placeholder="C:\\Users\\YourName\\Videos\\vedioFactory"
+              spellcheck="false"
+            />
+          </label>
+          <div class="inline-actions">
+            <button id="connectOutputDirButton" type="button" class="secondary">套用後端資料夾</button>
+            <button id="pickFolderButton" type="button" class="secondary">改用瀏覽器資料夾模式</button>
+          </div>
+          <label>
+            生成模組
+            <select id="moduleSelect"></select>
+          </label>
+          <div id="moduleDetails" class="module-details"></div>
+          <p class="hint">
+            預設會透過本機後端直接管理指定資料夾；若需要，也可切換成瀏覽器資料夾授權模式。
+          </p>
+        </div>
+
+        <div class="panel">
+          <h2>3. 設定影片參數</h2>
+          <form id="generationForm" class="panel">
+            <div class="parameter-grid">
+              <label>
+                長度（秒）
+                <input id="durationInput" type="number" min="2" max="30" step="1" value="6" />
+              </label>
+              <label>
+                FPS
+                <select id="fpsInput">
+                  <option value="12">12</option>
+                  <option value="24" selected>24</option>
+                  <option value="30">30</option>
+                </select>
+              </label>
+              <label>
+                解析度
+                <select id="resolutionInput">
+                  <option value="1280x720" selected>1280 × 720</option>
+                  <option value="1920x1080">1920 × 1080</option>
+                  <option value="1080x1080">1080 × 1080</option>
+                  <option value="720x1280">720 × 1280</option>
+                </select>
+              </label>
+              <label>
+                品質
+                <select id="qualityInput">
+                  <option value="draft">草稿</option>
+                  <option value="balanced" selected>平衡</option>
+                  <option value="premium">高品質</option>
+                </select>
+              </label>
+              <label>
+                運鏡強度
+                <input id="motionInput" type="range" min="0" max="100" value="55" />
+              </label>
+              <label>
+                文字強調
+                <input id="captionInput" type="range" min="0" max="100" value="65" />
+              </label>
+            </div>
+            <button id="generateButton" type="submit" class="primary">生成影片</button>
+            <p id="generationStatus" class="status-text">尚未開始生成。</p>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h2>4. 本機 NVIDIA / CUDA 推論骨架</h2>
+          <div id="inferenceRuntime" class="module-details"></div>
+          <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
+          <p id="inferenceStatus" class="status-text">尚未建立任何推論工作。</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Model Roadmap</p>
+            <h2>模型整合規劃表</h2>
+          </div>
+          <button id="setupModelBatchButton" type="button" class="secondary">建立首批模型整合清單</button>
+        </div>
+        <div id="modelCatalogSummary" class="empty-state">尚未載入模型規劃資料。</div>
+        <div id="modelCatalogGrid" class="library-grid"></div>
+        <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Library</p>
+            <h2>本機影片管理</h2>
+          </div>
+          <button id="refreshButton" type="button" class="secondary">重新整理清單</button>
+        </div>
+        <div id="libraryEmpty" class="empty-state">
+          尚未找到影片。先生成一段影片，或重新選擇已有產出的本機資料夾。
+        </div>
+        <div id="libraryGrid" class="library-grid"></div>
+      </section>
+    </main>
+
+    <template id="videoCardTemplate">
+      <article class="video-card">
+        <video controls preload="metadata"></video>
+        <div class="video-meta">
+          <h3></h3>
+          <p class="video-subtitle"></p>
+          <dl class="stats"></dl>
+          <p class="summary"></p>
+        </div>
+        <div class="clip-controls">
+          <label>
+            起點（秒）
+            <input data-role="clip-start" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            終點（秒）
+            <input data-role="clip-end" type="number" min="0.5" step="0.1" value="2" />
+          </label>
+        </div>
+        <div class="actions">
+          <button data-action="download" type="button" class="secondary">下載</button>
+          <button data-action="rename" type="button" class="secondary">重新命名</button>
+          <button data-action="clip" type="button" class="secondary">剪輯輸出</button>
+          <button data-action="regenerate" type="button" class="secondary">重新產出</button>
+          <button data-action="delete" type="button" class="danger">刪除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./assets/app.js" defer></script>
+    <script src="./assets/modules.js" defer></script>
+  </body>
+</html>
