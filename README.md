@@ -11,22 +11,22 @@
 
 ## 快速啟動
 
-```bash
-cd /home/runner/work/vedioFactory/vedioFactory
+```powershell
+cd C:\path\to\vedioFactory
 npm install
 npm start
 ```
 
 然後開啟 `http://127.0.0.1:8000`。
 
-> 預設輸出資料夾是 `/home/runner/work/vedioFactory/vedioFactory/output`。你也可以在網站上輸入任意絕對路徑，切換成本機後端管理的資料夾。若想改用瀏覽器授權資料夾，也可以在介面中手動切換。
+> 在 Windows 11 上，預設輸出資料夾會是 `C:\Users\<你的帳號>\Videos\vedioFactory`。你也可以在網站上輸入任意絕對路徑，切換成本機後端管理的資料夾。若想改用瀏覽器授權資料夾，也可以在介面中手動切換。
 
 ## 使用方式
 
 1. 上傳照片（可選）
 2. 輸入提示詞或影片描述（至少填一項）
 3. 選擇生成模組與影片參數
-4. 直接使用預設後端輸出資料夾，或輸入新的絕對路徑後按「套用後端資料夾」
+4. 直接使用預設後端輸出資料夾，或輸入新的絕對路徑（例如 `C:\Users\<你的帳號>\Videos\vedioFactory\Exports`）後按「套用後端資料夾」
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
@@ -34,8 +34,8 @@ npm start
 
 安裝測試依賴後可直接跑實際瀏覽器驗證：
 
-```bash
-cd /home/runner/work/vedioFactory/vedioFactory
+```powershell
+cd C:\path\to\vedioFactory
 npm install
 npm run test:api
 npm run test:visual

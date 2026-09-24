@@ -1,12 +1,15 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const { URL } = require('node:url');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 8000);
 const ROOT_DIR = __dirname;
-const DEFAULT_OUTPUT_DIR = path.resolve(process.env.VEDIO_FACTORY_OUTPUT_DIR || path.join(ROOT_DIR, 'output'));
+const DEFAULT_OUTPUT_DIR = path.resolve(
+  process.env.VEDIO_FACTORY_OUTPUT_DIR || path.join(os.homedir(), 'Videos', 'vedioFactory'),
+);
 const MAX_JSON_BODY = 80 * 1024 * 1024;
 
 const contentTypes = {
