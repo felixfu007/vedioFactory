@@ -22,6 +22,10 @@
             <strong id="folderName">尚未選擇</strong>
           </div>
           <div>
+            <span class="status-label">儲存模式</span>
+            <strong id="storageMode">瀏覽器暫存</strong>
+          </div>
+          <div>
             <span class="status-label">已註冊模組</span>
             <strong id="moduleCount">0</strong>
           </div>
@@ -48,13 +52,25 @@
         <div class="panel">
           <h2>2. 切換生成模組</h2>
           <label>
+            後端輸出資料夾（絕對路徑）
+            <input
+              id="outputDirInput"
+              type="text"
+              placeholder="/home/your-name/Videos/vedioFactory"
+              spellcheck="false"
+            />
+          </label>
+          <div class="inline-actions">
+            <button id="connectOutputDirButton" type="button" class="secondary">套用後端資料夾</button>
+            <button id="pickFolderButton" type="button" class="secondary">改用瀏覽器資料夾模式</button>
+          </div>
+          <label>
             生成模組
             <select id="moduleSelect"></select>
           </label>
           <div id="moduleDetails" class="module-details"></div>
-          <button id="pickFolderButton" type="button" class="secondary">選擇本機輸出資料夾</button>
           <p class="hint">
-            建議在 Chromium / Edge / Chrome 的 localhost 環境中使用，可直接寫入指定資料夾；若瀏覽器不支援，系統會自動改用下載模式。
+            預設會透過本機後端直接管理指定資料夾；若需要，也可切換成瀏覽器資料夾授權模式。
           </p>
         </div>
 

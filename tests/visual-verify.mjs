@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import puppeteer from 'puppeteer-core';
+
+const require = createRequire(import.meta.url);
+const { startServer } = require('../server.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -33,17 +37,6 @@ const scenarios = [
   },
 ];
 
-function getContentType(filePath) {
-  const extension = path.extname(filePath).toLowerCase();
-  return ({
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.svg': 'image/svg+xml',
-    '.json': 'application/json; charset=utf-8',
-  })[extension] || 'application/octet-stream';
-}
-
 async function ensureFixtures() {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(sampleSvgPath, `
@@ -56,43 +49,18 @@ async function ensureFixtures() {
 `.trim());
 }
 
-async function createStaticServer(rootDir) {
-  const server = http.createServer(async (request, response) => {
-    try {
-      const requestUrl = new URL(request.url, 'http://127.0.0.1');
-      const pathname = decodeURIComponent(requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname);
-      const targetPath = path.join(rootDir, pathname);
-      const normalizedPath = path.normalize(targetPath);
-
-      if (!normalizedPath.startsWith(rootDir)) {
-        response.writeHead(403);
-        response.end('Forbidden');
-        return;
-      }
-
-      const payload = await fs.readFile(normalizedPath);
-      response.writeHead(200, { 'content-type': getContentType(normalizedPath) });
-      response.end(payload);
-    } catch (error) {
-      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-      response.end('Not found');
-    }
-  });
-
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  return {
-    server,
-    origin: `http://127.0.0.1:${address.port}`,
-  };
-}
-
 async function saveDataUrl(targetPath, dataUrl) {
   const [, base64Payload] = dataUrl.split(',');
   await fs.writeFile(targetPath, Buffer.from(base64Payload, 'base64'));
 }
 
-async function runScenario(browser, origin, scenario) {
+async function resetDirectory(targetDir) {
+  await fs.rm(targetDir, { recursive: true, force: true });
+  await fs.mkdir(targetDir, { recursive: true });
+}
+
+async function runScenario(browser, origin, scenario, managedOutputDir) {
+  await resetDirectory(managedOutputDir);
   const page = await browser.newPage();
 
   try {
@@ -100,6 +68,7 @@ async function runScenario(browser, origin, scenario) {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: 'networkidle0' });
 
+    await page.waitForFunction(() => document.querySelector('#storageMode')?.textContent.includes('後端'));
     await page.type('#promptInput', scenario.prompt);
     await page.type('#storyInput', scenario.story);
     await page.select('#moduleSelect', scenario.moduleId);
@@ -179,6 +148,7 @@ async function runScenario(browser, origin, scenario) {
         actualFrame,
         referenceFrame,
         status: document.querySelector('#generationStatus')?.textContent,
+        storageMode: document.querySelector('#storageMode')?.textContent,
       };
     });
 
@@ -190,6 +160,7 @@ async function runScenario(browser, origin, scenario) {
     assert.equal(verification.item.moduleId, scenario.moduleId);
     assert.equal(verification.item.prompt, scenario.prompt);
     assert.equal(verification.item.story, scenario.story);
+    assert.equal(verification.storageMode, '後端資料夾');
     assert.ok(verification.similarity >= scenario.threshold, `${scenario.name} similarity ${verification.similarity} below ${scenario.threshold}`);
 
     return {
@@ -205,7 +176,10 @@ async function runScenario(browser, origin, scenario) {
 
 async function main() {
   await ensureFixtures();
-  const { server, origin } = await createStaticServer(repoRoot);
+  const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-'));
+  const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir });
+  const address = app.server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
 
   const browser = await puppeteer.launch({
     executablePath: chromiumPath,
@@ -216,12 +190,13 @@ async function main() {
   try {
     const results = [];
     for (const scenario of scenarios) {
-      results.push(await runScenario(browser, origin, scenario));
+      results.push(await runScenario(browser, origin, scenario, managedOutputDir));
     }
 
     const report = {
       generatedAt: new Date().toISOString(),
       origin,
+      managedOutputDir,
       scenarios: results.map((result) => ({
         name: result.item.fileName,
         moduleId: result.item.moduleId,
@@ -239,7 +214,8 @@ async function main() {
     console.log(JSON.stringify(report, null, 2));
   } finally {
     await browser.close();
-    server.close();
+    await new Promise((resolve) => app.server.close(resolve));
+    await fs.rm(managedOutputDir, { recursive: true, force: true });
   }
 }
 

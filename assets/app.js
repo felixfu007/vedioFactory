@@ -10,6 +10,10 @@
     library: [],
     folderHandle: null,
     generating: false,
+    backend: {
+      available: false,
+      outputDir: '',
+    },
   };
 
   const storageKey = 'vedioFactory.library';
@@ -70,10 +74,18 @@
     ui.libraryGrid = document.querySelector('#libraryGrid');
     ui.libraryEmpty = document.querySelector('#libraryEmpty');
     ui.folderName = document.querySelector('#folderName');
+    ui.storageMode = document.querySelector('#storageMode');
     ui.moduleCount = document.querySelector('#moduleCount');
+    ui.outputDirInput = document.querySelector('#outputDirInput');
+    ui.connectOutputDirButton = document.querySelector('#connectOutputDirButton');
     ui.pickFolderButton = document.querySelector('#pickFolderButton');
     ui.refreshButton = document.querySelector('#refreshButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
+  }
+
+  function getFolderLabel(input) {
+    if (!input) return '尚未選擇';
+    return input.split(/[\\/]/u).filter(Boolean).at(-1) || input;
   }
 
   function renderModuleOptions() {
@@ -119,6 +131,24 @@
     ui.generationStatus.textContent = message;
   }
 
+  function syncStorageUi() {
+    if (state.backend.available) {
+      ui.storageMode.textContent = '後端資料夾';
+      ui.folderName.textContent = getFolderLabel(state.backend.outputDir);
+      ui.outputDirInput.value = state.backend.outputDir;
+      return;
+    }
+
+    if (state.folderHandle) {
+      ui.storageMode.textContent = '瀏覽器資料夾';
+      ui.folderName.textContent = state.folderHandle.name;
+      return;
+    }
+
+    ui.storageMode.textContent = '瀏覽器暫存';
+    ui.folderName.textContent = '尚未選擇';
+  }
+
   function setGeneratingState(isGenerating) {
     state.generating = isGenerating;
     ui.generateButton.disabled = isGenerating;
@@ -128,6 +158,33 @@
   function resolutionToSize(value) {
     const [width, height] = value.split('x').map((item) => Number(item));
     return { width, height };
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        resolve(dataUrl.split(',')[1] ?? '');
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('讀取影片失敗'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function fetchJson(url, options = {}) {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'content-type': 'application/json',
+        ...(options.headers ?? {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Request failed: ${response.status}`);
+    }
+    return payload;
   }
 
   function readFileAsDataUrl(file) {
@@ -248,6 +305,18 @@
   }
 
   async function saveAssetSet(item) {
+    if (state.backend.available) {
+      item.previewUrl = `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`;
+      await fetchJson('/api/videos', {
+        method: 'POST',
+        body: JSON.stringify({
+          item: stripTransientFields(item),
+          videoBase64: await blobToBase64(item.blob),
+        }),
+      });
+      return item;
+    }
+
     if (!state.folderHandle) {
       item.previewUrl = URL.createObjectURL(item.blob);
       return item;
@@ -266,6 +335,13 @@
   }
 
   async function listFolderItems() {
+    if (state.backend.available) {
+      const items = await fetchJson('/api/videos');
+      state.library = items;
+      serializeLibrary();
+      return items;
+    }
+
     if (!state.folderHandle) return state.library;
 
     const nextLibrary = [];
@@ -284,6 +360,9 @@
   }
 
   async function getPreviewUrl(fileName) {
+    if (state.backend.available) {
+      return `/api/videos/${encodeURIComponent(fileName)}?t=${Date.now()}`;
+    }
     if (!state.folderHandle) return '';
     const fileHandle = await state.folderHandle.getFileHandle(fileName);
     const file = await fileHandle.getFile();
@@ -396,7 +475,9 @@
         moduleName: moduleDefinition.name,
       };
       await saveAssetSet(item);
-      if (!state.folderHandle) {
+      if (state.backend.available) {
+        await listFolderItems();
+      } else if (!state.folderHandle) {
         state.library = [{ ...stripTransientFields(item), previewUrl: item.previewUrl }, ...state.library];
       } else {
         await listFolderItems();
@@ -436,8 +517,10 @@
     }
 
     try {
+      state.backend.available = false;
+      state.backend.outputDir = '';
       state.folderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      ui.folderName.textContent = state.folderHandle.name;
+      syncStorageUi();
       await listFolderItems();
       renderLibrary();
       setStatus(`已連線到資料夾：${state.folderHandle.name}`);
@@ -446,6 +529,47 @@
         console.error(error);
         setStatus('選擇資料夾失敗，請稍後再試。');
       }
+    }
+  }
+
+  async function connectOutputDir() {
+    try {
+      const outputDir = ui.outputDirInput.value.trim();
+      if (!outputDir) {
+        setStatus('請先輸入後端輸出資料夾絕對路徑。');
+        return;
+      }
+
+      const payload = await fetchJson('/api/config/output-dir', {
+        method: 'POST',
+        body: JSON.stringify({ outputDir }),
+      });
+
+      state.backend.available = true;
+      state.backend.outputDir = payload.outputDir;
+      state.folderHandle = null;
+      state.library = payload.items;
+      syncStorageUi();
+      serializeLibrary();
+      renderLibrary();
+      setStatus(`已套用後端資料夾：${payload.outputDir}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`設定後端資料夾失敗：${error.message}`);
+    }
+  }
+
+  async function initBackend() {
+    try {
+      const payload = await fetchJson('/api/config', { headers: {} });
+      state.backend.available = true;
+      state.backend.outputDir = payload.outputDir;
+      state.folderHandle = null;
+      await listFolderItems();
+    } catch (error) {
+      console.warn('Backend unavailable, falling back to browser mode.', error);
+    } finally {
+      syncStorageUi();
     }
   }
 
@@ -463,6 +587,13 @@
   }
 
   async function getItemBlob(item) {
+    if (state.backend.available) {
+      const response = await fetch(`/api/videos/${encodeURIComponent(item.fileName)}`);
+      if (!response.ok) {
+        throw new Error(`讀取影片失敗：${response.status}`);
+      }
+      return response.blob();
+    }
     if (state.folderHandle) {
       const fileHandle = await state.folderHandle.getFileHandle(item.fileName);
       return fileHandle.getFile();
@@ -476,13 +607,17 @@
 
   async function downloadItem(item) {
     try {
-      const blob = await getItemBlob(item);
-      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
+      if (state.backend.available) {
+        link.href = `/api/videos/${encodeURIComponent(item.fileName)}?download=1`;
+      } else {
+        const blob = await getItemBlob(item);
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      }
       link.download = item.fileName;
       link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (error) {
       console.error(error);
       setStatus(`下載失敗：${error.message}`);
@@ -498,6 +633,17 @@
         ...item,
         fileName: nextFileName,
       };
+
+      if (state.backend.available) {
+        await fetchJson(`/api/videos/${encodeURIComponent(item.fileName)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ nextFileName }),
+        });
+        await listFolderItems();
+        renderLibrary();
+        setStatus(`已重新命名為 ${nextFileName}`);
+        return;
+      }
 
       if (state.folderHandle) {
         const blob = await getItemBlob(item);
@@ -525,7 +671,12 @@
     try {
       if (!window.confirm(`確定刪除 ${item.fileName} 嗎？`)) return;
 
-      if (state.folderHandle) {
+      if (state.backend.available) {
+        await fetchJson(`/api/videos/${encodeURIComponent(item.fileName)}`, {
+          method: 'DELETE',
+        });
+        await listFolderItems();
+      } else if (state.folderHandle) {
         await state.folderHandle.removeEntry(item.fileName);
         await state.folderHandle.removeEntry(`${item.fileName}.json`);
         await listFolderItems();
@@ -617,7 +768,7 @@
         story: `${item.story || item.prompt || '影片'}（${startTime}s - ${endTime}s 剪輯版）`,
       };
       await saveAssetSet(cloned);
-      if (state.folderHandle) {
+      if (state.backend.available || state.folderHandle) {
         await listFolderItems();
       } else {
         state.library.unshift({ ...stripTransientFields(cloned), previewUrl: cloned.previewUrl });
@@ -687,16 +838,19 @@
   function attachEvents() {
     ui.moduleSelect.addEventListener('change', renderModuleDetails);
     ui.generateButton.addEventListener('click', generateFromForm);
+    ui.connectOutputDirButton.addEventListener('click', connectOutputDir);
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
   }
 
-  function initApp() {
+  async function initApp() {
     bindUi();
     loadStoredLibrary();
     restoreStoredLibraryPreview();
     renderModuleOptions();
     attachEvents();
+    await initBackend();
+    syncStorageUi();
     renderLibrary();
   }
 
@@ -710,7 +864,10 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.VedioFactory?.initApp === 'function') {
-      window.VedioFactory.initApp();
+      window.VedioFactory.initApp().catch((error) => {
+        console.error(error);
+        setStatus(`初始化失敗：${error.message}`);
+      });
     }
   });
 })();

@@ -5,26 +5,28 @@
 - 匯入照片 + 提示詞，或直接輸入影片描述生成影片
 - 可切換 / 擴充生成模組，快速輸出不同風格
 - 可調整影片長度、FPS、解析度、品質與運鏡強度
-- 可把輸出直接保存到本機指定資料夾（支援瀏覽器資料夾授權時）
+- 可把輸出透過本機後端保存到指定資料夾，也可切換成瀏覽器資料夾授權模式
 - 內建影片管理：下載、重新命名、剪輯輸出、刪除、重新產出
+- 後續可延伸成地端本機顯示卡運算流程，不依賴第三方影片 API
 
 ## 快速啟動
 
 ```bash
 cd /home/runner/work/vedioFactory/vedioFactory
-python3 -m http.server 8000
+npm install
+npm start
 ```
 
-然後開啟 `http://localhost:8000`。
+然後開啟 `http://127.0.0.1:8000`。
 
-> 建議使用 Chromium / Edge / Chrome，在 localhost 環境下可使用 File System Access API 直接把影片寫入指定資料夾；若瀏覽器不支援，系統會退回成下載模式。
+> 預設輸出資料夾是 `/home/runner/work/vedioFactory/vedioFactory/output`。你也可以在網站上輸入任意絕對路徑，切換成本機後端管理的資料夾。若想改用瀏覽器授權資料夾，也可以在介面中手動切換。
 
 ## 使用方式
 
 1. 上傳照片（可選）
 2. 輸入提示詞或影片描述（至少填一項）
 3. 選擇生成模組與影片參數
-4. 視需要選擇本機輸出資料夾
+4. 直接使用預設後端輸出資料夾，或輸入新的絕對路徑後按「套用後端資料夾」
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
@@ -35,15 +37,24 @@ python3 -m http.server 8000
 ```bash
 cd /home/runner/work/vedioFactory/vedioFactory
 npm install
+npm run test:api
 npm run test:visual
 ```
 
 此流程會：
 
-- 啟動本機靜態站點
+- 啟動本機後端服務
 - 用 Chromium 實際生成影片
 - 輸出頁面截圖與影片中段畫面截圖到 `visual-output/`
 - 將影片實際畫面與同設定下的參考畫面做相似度比對，確認生成內容與提示詞/描述一致
+
+`npm run test:api` 會額外驗證：
+
+- 後端輸出資料夾設定
+- 影片保存 / 列表
+- 重新命名
+- 檔案讀取
+- 刪除
 
 ## 模組擴充
 
@@ -69,7 +80,7 @@ window.VedioFactory.registerModule({
 
 ## 輸出內容
 
-若已授權資料夾，系統會在指定資料夾中保存：
+若使用後端資料夾模式，系統會在指定資料夾中保存：
 
 - `*.webm`：生成後的影片檔
 - `*.webm.json`：對應的影片設定與來源資訊，供重新整理、重新產出與管理功能使用

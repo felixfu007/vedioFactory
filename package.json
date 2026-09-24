@@ -2,9 +2,11 @@
   "name": "vediofactory",
   "version": "1.0.0",
   "description": "本機優先的 AI 影片生成服務網站，支援：",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "node tests/visual-verify.mjs",
+    "start": "node server.js",
+    "test": "npm run test:api && npm run test:visual",
+    "test:api": "node tests/backend-api.mjs",
     "test:visual": "node tests/visual-verify.mjs"
   },
   "repository": {
@@ -15,9 +17,6 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "devDependencies": {
-    "puppeteer-core": "^25.12.0"
-  },
   "devDependencies": {
     "puppeteer-core": "^25.12.0"
   }
