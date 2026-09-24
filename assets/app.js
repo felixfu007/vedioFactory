@@ -14,6 +14,10 @@
       available: false,
       outputDir: '',
     },
+    inference: {
+      runtime: null,
+      lastJob: null,
+    },
   };
 
   const storageKey = 'vedioFactory.library';
@@ -75,11 +79,15 @@
     ui.libraryEmpty = document.querySelector('#libraryEmpty');
     ui.folderName = document.querySelector('#folderName');
     ui.storageMode = document.querySelector('#storageMode');
+    ui.gpuStatus = document.querySelector('#gpuStatus');
     ui.moduleCount = document.querySelector('#moduleCount');
     ui.outputDirInput = document.querySelector('#outputDirInput');
     ui.connectOutputDirButton = document.querySelector('#connectOutputDirButton');
     ui.pickFolderButton = document.querySelector('#pickFolderButton');
     ui.refreshButton = document.querySelector('#refreshButton');
+    ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
+    ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
+    ui.inferenceStatus = document.querySelector('#inferenceStatus');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
   }
 
@@ -131,6 +139,10 @@
     ui.generationStatus.textContent = message;
   }
 
+  function setInferenceStatus(message) {
+    ui.inferenceStatus.textContent = message;
+  }
+
   function syncStorageUi() {
     if (state.backend.available) {
       ui.storageMode.textContent = '後端資料夾';
@@ -147,6 +159,37 @@
 
     ui.storageMode.textContent = '瀏覽器暫存';
     ui.folderName.textContent = '尚未選擇';
+  }
+
+  function renderInferenceRuntime() {
+    const runtime = state.inference.runtime;
+    ui.inferenceRuntime.replaceChildren();
+
+    if (!runtime) {
+      ui.gpuStatus.textContent = '未連線';
+      ui.inferenceRuntime.textContent = '尚未取得本機推論狀態。';
+      ui.queueInferenceButton.disabled = true;
+      return;
+    }
+
+    ui.gpuStatus.textContent = runtime.gpu?.detected ? '已偵測 NVIDIA' : '待設定';
+    ui.queueInferenceButton.disabled = !state.backend.available;
+
+    const lines = [
+      `平台：${runtime.platform}`,
+      `GPU：${runtime.gpu?.detected ? `${runtime.gpu.name || 'NVIDIA'} / ${runtime.gpu.memoryTotal || '未知 VRAM'}` : '尚未偵測到 nvidia-smi'}`,
+      `模型目錄：${runtime.modelDir}`,
+      `推論命令：${runtime.engineCommandConfigured ? `${runtime.engineCommand} ${runtime.engineArgs.join(' ')}`.trim() : '尚未設定 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND'}`,
+      `方向：${runtime.provider}`,
+    ];
+
+    const list = document.createElement('ul');
+    lines.forEach((line) => {
+      const item = document.createElement('li');
+      item.textContent = line;
+      list.append(item);
+    });
+    ui.inferenceRuntime.append(list);
   }
 
   function setGeneratingState(isGenerating) {
@@ -521,6 +564,7 @@
       state.backend.outputDir = '';
       state.folderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       syncStorageUi();
+      renderInferenceRuntime();
       await listFolderItems();
       renderLibrary();
       setStatus(`已連線到資料夾：${state.folderHandle.name}`);
@@ -549,8 +593,10 @@
       state.backend.outputDir = payload.outputDir;
       state.folderHandle = null;
       state.library = payload.items;
+      state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
       syncStorageUi();
       serializeLibrary();
+      renderInferenceRuntime();
       renderLibrary();
       setStatus(`已套用後端資料夾：${payload.outputDir}`);
     } catch (error) {
@@ -566,10 +612,53 @@
       state.backend.outputDir = payload.outputDir;
       state.folderHandle = null;
       await listFolderItems();
+      state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
     } catch (error) {
       console.warn('Backend unavailable, falling back to browser mode.', error);
     } finally {
       syncStorageUi();
+      renderInferenceRuntime();
+    }
+  }
+
+  async function queueInferenceJob() {
+    try {
+      if (!state.backend.available) {
+        setInferenceStatus('目前未連線到本機後端，無法建立推論工作。');
+        return;
+      }
+
+      const file = ui.imageInput.files?.[0] ?? null;
+      const sourceImageDataUrl = await readFileAsDataUrl(file);
+      const spec = gatherSpec({ sourceImageDataUrl });
+      if (!spec.prompt && !spec.story) {
+        setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
+        return;
+      }
+
+      const job = await fetchJson('/api/inference/jobs', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: spec.prompt,
+          story: spec.story,
+          moduleId: spec.moduleId,
+          sourceImageDataUrl: spec.sourceImageDataUrl,
+          settings: {
+            duration: spec.duration,
+            fps: spec.fps,
+            resolution: spec.resolution,
+            quality: spec.quality,
+            motion: spec.motion,
+            captionStrength: spec.captionStrength,
+          },
+        }),
+      });
+
+      state.inference.lastJob = job;
+      setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
+    } catch (error) {
+      console.error(error);
+      setInferenceStatus(`建立推論工作失敗：${error.message}`);
     }
   }
 
@@ -841,6 +930,7 @@
     ui.connectOutputDirButton.addEventListener('click', connectOutputDir);
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
+    ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
   }
 
   async function initApp() {

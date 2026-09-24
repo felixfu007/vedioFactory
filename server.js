@@ -1,4 +1,6 @@
 const http = require('node:http');
+const { execFile } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,7 +12,11 @@ const ROOT_DIR = __dirname;
 const DEFAULT_OUTPUT_DIR = path.resolve(
   process.env.VEDIO_FACTORY_OUTPUT_DIR || path.join(os.homedir(), 'Videos', 'vedioFactory'),
 );
+const DEFAULT_MODEL_DIR = path.resolve(
+  process.env.VEDIO_FACTORY_MODEL_DIR || path.join(os.homedir(), 'vedioFactory', 'models'),
+);
 const MAX_JSON_BODY = 80 * 1024 * 1024;
+const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -63,6 +69,14 @@ function sanitizeFileName(fileName) {
   return normalized;
 }
 
+function sanitizePathSegment(value, fallback = 'item') {
+  return String(value || fallback)
+    .trim()
+    .replace(/[^a-z0-9_-]+/giu, '-')
+    .replace(/(^-|-$)/gu, '')
+    .slice(0, 40) || fallback;
+}
+
 async function fileExists(targetPath) {
   try {
     await fs.access(targetPath);
@@ -91,6 +105,80 @@ async function readJsonBody(request) {
   } catch {
     throw new Error('JSON 格式錯誤。');
   }
+}
+
+function execFileAsync(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function getLocalEngineConfig() {
+  return {
+    provider: 'local-nvidia-cuda',
+    command: process.env.VEDIO_FACTORY_LOCAL_ENGINE_COMMAND || '',
+    args: (process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS || '')
+      .split(/\s+/u)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    modelDir: DEFAULT_MODEL_DIR,
+  };
+}
+
+async function detectNvidiaRuntime() {
+  try {
+    const { stdout } = await execFileAsync(
+      'nvidia-smi',
+      ['--query-gpu=name,driver_version,memory.total', '--format=csv,noheader'],
+      { timeout: 2_500 },
+    );
+    const [firstLine = ''] = stdout.trim().split(/\r?\n/u);
+    const [name = '', driverVersion = '', memoryTotal = ''] = firstLine.split(',').map((item) => item.trim());
+    return {
+      detected: Boolean(firstLine),
+      name,
+      driverVersion,
+      memoryTotal,
+      probe: 'nvidia-smi',
+    };
+  } catch (error) {
+    return {
+      detected: false,
+      name: '',
+      driverVersion: '',
+      memoryTotal: '',
+      probe: 'nvidia-smi',
+      error: error.code || error.message,
+    };
+  }
+}
+
+async function getInferenceRuntime(outputDir) {
+  const engine = getLocalEngineConfig();
+  const gpu = await detectNvidiaRuntime();
+  return {
+    provider: engine.provider,
+    localGpuPreferred: true,
+    platform: process.platform,
+    outputDir,
+    modelDir: engine.modelDir,
+    engineCommandConfigured: Boolean(engine.command),
+    engineCommand: engine.command,
+    engineArgs: engine.args,
+    gpu,
+    guidance: [
+      '建議在 Windows 11 安裝最新 NVIDIA 驅動、CUDA Toolkit 與 Python 3.11。',
+      '將未來的本機推論入口指令寫入 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND。',
+      `模型權重預設放在 ${engine.modelDir}。`,
+    ],
+  };
 }
 
 async function collectVideoItems(outputDir) {
@@ -124,6 +212,29 @@ function createApp(options = {}) {
     await fs.mkdir(outputDir, { recursive: true });
   }
 
+  async function ensureInferenceJobDir() {
+    await fs.mkdir(path.join(outputDir, INFERENCE_JOBS_DIR_NAME), { recursive: true });
+  }
+
+  async function listInferenceJobs() {
+    await ensureInferenceJobDir();
+    const jobsDir = path.join(outputDir, INFERENCE_JOBS_DIR_NAME);
+    const entries = await fs.readdir(jobsDir, { withFileTypes: true });
+    const jobs = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const payload = JSON.parse(await fs.readFile(path.join(jobsDir, entry.name), 'utf8'));
+      jobs.push(payload);
+    }
+    jobs.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return jobs;
+  }
+
+  async function getInferenceJob(jobId) {
+    const jobs = await listInferenceJobs();
+    return jobs.find((item) => item.id === jobId) || null;
+  }
+
   async function saveVideoAsset(item, videoBase64) {
     const fileName = sanitizeFileName(item.fileName);
     const videoPath = path.join(outputDir, fileName);
@@ -145,6 +256,40 @@ function createApp(options = {}) {
     };
   }
 
+  async function createInferenceJob(payload) {
+    await ensureOutputDir();
+    await ensureInferenceJobDir();
+
+    const runtime = await getInferenceRuntime(outputDir);
+    const job = {
+      id: crypto.randomUUID(),
+      status: runtime.engineCommandConfigured ? 'queued' : 'scaffolded',
+      provider: runtime.provider,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      prompt: payload.prompt || '',
+      story: payload.story || '',
+      moduleId: payload.moduleId || '',
+      settings: payload.settings || {},
+      sourceImageDataUrl: payload.sourceImageDataUrl || '',
+      modelDir: runtime.modelDir,
+      engineCommandConfigured: runtime.engineCommandConfigured,
+      engineCommand: runtime.engineCommand,
+      engineArgs: runtime.engineArgs,
+      guidance: runtime.engineCommandConfigured
+        ? '已偵測到本機推論命令，可在後續版本接上真正模型執行流程。'
+        : '尚未設定本機推論命令。請先設定 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND 與模型目錄。',
+      manifestPath: path.join(
+        outputDir,
+        INFERENCE_JOBS_DIR_NAME,
+        `${Date.now()}-${sanitizePathSegment(payload.moduleId, 'job')}.json`,
+      ),
+    };
+
+    await fs.writeFile(job.manifestPath, JSON.stringify(job, null, 2));
+    return job;
+  }
+
   async function handleApi(request, response, requestUrl) {
     if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
       return sendJson(response, 200, { ok: true });
@@ -158,6 +303,30 @@ function createApp(options = {}) {
         storageMode: 'backend',
         localGpuPreferred: true,
       });
+    }
+
+    if (requestUrl.pathname === '/api/inference/runtime' && request.method === 'GET') {
+      await ensureOutputDir();
+      return sendJson(response, 200, await getInferenceRuntime(outputDir));
+    }
+
+    if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'GET') {
+      return sendJson(response, 200, await listInferenceJobs());
+    }
+
+    if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {
+      const body = await readJsonBody(request);
+      return sendJson(response, 201, await createInferenceJob(body));
+    }
+
+    if (requestUrl.pathname.startsWith('/api/inference/jobs/') && request.method === 'GET') {
+      const jobId = requestUrl.pathname.slice('/api/inference/jobs/'.length);
+      const job = await getInferenceJob(jobId);
+      if (!job) {
+        sendJson(response, 404, { error: '找不到推論工作。' });
+        return;
+      }
+      return sendJson(response, 200, job);
     }
 
     if (requestUrl.pathname === '/api/config/output-dir' && request.method === 'POST') {

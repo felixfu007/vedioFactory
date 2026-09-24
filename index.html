@@ -29,6 +29,10 @@
             <span class="status-label">已註冊模組</span>
             <strong id="moduleCount">0</strong>
           </div>
+          <div>
+            <span class="status-label">本機 GPU 推論</span>
+            <strong id="gpuStatus">檢查中</strong>
+          </div>
         </div>
       </section>
 
@@ -117,6 +121,13 @@
           </div>
           <button id="generateButton" type="button" class="primary">生成影片</button>
           <p id="generationStatus" class="status-text">尚未開始生成。</p>
+        </div>
+
+        <div class="panel">
+          <h2>4. 本機 NVIDIA / CUDA 推論骨架</h2>
+          <div id="inferenceRuntime" class="module-details"></div>
+          <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
+          <p id="inferenceStatus" class="status-text">尚未建立任何推論工作。</p>
         </div>
       </section>
 

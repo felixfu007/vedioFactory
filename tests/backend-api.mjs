@@ -22,6 +22,12 @@ async function main() {
     assert.equal(config.backendAvailable, true);
     assert.equal(config.outputDir, managedOutputDir);
 
+    const runtime = await fetch(`${origin}/api/inference/runtime`).then((response) => response.json());
+    assert.equal(runtime.provider, 'local-nvidia-cuda');
+    assert.equal(runtime.localGpuPreferred, true);
+    assert.equal(runtime.outputDir, managedOutputDir);
+    assert.ok(Array.isArray(runtime.guidance));
+
     const item = {
       id: 'api-test-id',
       fileName: 'api-test.webm',
@@ -70,6 +76,32 @@ async function main() {
       method: 'DELETE',
     }).then((response) => response.json());
     assert.equal(deleted.ok, true);
+
+    const inferenceJob = await fetch(`${origin}/api/inference/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: '測試本機推論工作',
+        story: '建立本機 GPU 推論骨架工作',
+        moduleId: 'storyboard-focus',
+        settings: {
+          duration: 2,
+          resolution: '1280x720',
+        },
+      }),
+    }).then((response) => response.json());
+    assert.equal(inferenceJob.provider, 'local-nvidia-cuda');
+    assert.match(inferenceJob.status, /queued|scaffolded/);
+
+    const listedJobs = await fetch(`${origin}/api/inference/jobs`).then((response) => response.json());
+    assert.equal(listedJobs.length, 1);
+    assert.equal(listedJobs[0].id, inferenceJob.id);
+
+    const fetchedJob = await fetch(`${origin}/api/inference/jobs/${inferenceJob.id}`).then((response) => response.json());
+    assert.equal(fetchedJob.id, inferenceJob.id);
+
+    const manifestText = await fs.readFile(inferenceJob.manifestPath, 'utf8');
+    assert.match(manifestText, /local-nvidia-cuda/);
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
