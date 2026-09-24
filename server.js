@@ -419,6 +419,7 @@ function createApp(options = {}) {
     await ensureModelSetupDir();
     const runtime = await getInferenceRuntime(outputDir);
     const catalog = buildModelCatalog(runtime.modelDir);
+    const requestToken = crypto.randomUUID();
     const manifests = [];
 
     for (const model of catalog.models.filter((item) => item.batch === 'first-wave')) {
@@ -434,7 +435,7 @@ function createApp(options = {}) {
         nextAction: '準備模型權重、推論節點與本機命令整合',
         recommendedFor: model.bestFor,
       };
-      const manifestPath = path.join(outputDir, MODEL_SETUP_DIR_NAME, `${Date.now()}-${model.id}.json`);
+      const manifestPath = path.join(outputDir, MODEL_SETUP_DIR_NAME, `${Date.now()}-${requestToken}-${model.id}.json`);
       await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, manifestPath }, null, 2));
       manifests.push({ ...manifest, manifestPath });
     }
@@ -473,8 +474,9 @@ function createApp(options = {}) {
     await ensureInferenceJobDir();
 
     const runtime = await getInferenceRuntime(outputDir);
+    const jobId = crypto.randomUUID();
     const job = {
-      id: crypto.randomUUID(),
+      id: jobId,
       status: runtime.engineCommandConfigured ? 'queued' : 'scaffolded',
       provider: runtime.provider,
       createdAt: new Date().toISOString(),
@@ -494,7 +496,7 @@ function createApp(options = {}) {
       manifestPath: path.join(
         outputDir,
         INFERENCE_JOBS_DIR_NAME,
-        `${Date.now()}-${sanitizePathSegment(payload.moduleId, 'job')}.json`,
+        `${Date.now()}-${jobId}-${sanitizePathSegment(payload.moduleId, 'job')}.json`,
       ),
     };
 
@@ -647,7 +649,8 @@ function createApp(options = {}) {
   async function handleStatic(request, response, requestUrl) {
     const pathname = decodeURIComponent(requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname);
     const targetPath = path.normalize(path.join(ROOT_DIR, pathname));
-    if (!targetPath.startsWith(ROOT_DIR)) {
+    const relativePath = path.relative(ROOT_DIR, targetPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
       sendText(response, 403, 'Forbidden');
       return;
     }

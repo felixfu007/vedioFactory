@@ -39,9 +39,11 @@ async function main() {
       body: JSON.stringify({}),
     }).then((response) => response.json());
     assert.equal(setupBatch.firstBatchModels.length, 4);
-    assert.equal(setupBatch.firstBatchModels[0].modelId, 'sdxl');
-    const setupManifestText = await fs.readFile(setupBatch.firstBatchModels[0].manifestPath, 'utf8');
-    assert.match(setupManifestText, /sdxl/);
+    assert.deepEqual(setupBatch.firstBatchModels.map((model) => model.modelId), ['sdxl', 'animatediff', 'realesrgan', 'rife']);
+    for (const manifest of setupBatch.firstBatchModels) {
+      const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
+      assert.match(setupManifestText, new RegExp(manifest.modelId));
+    }
 
     const item = {
       id: 'api-test-id',

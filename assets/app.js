@@ -31,6 +31,9 @@
     }
 
     modules.push(moduleDefinition);
+    if (ui.moduleSelect) {
+      renderModuleOptions();
+    }
   }
 
   function getModuleById(id) {
@@ -821,6 +824,15 @@
       }
 
       if (state.folderHandle) {
+        try {
+          await state.folderHandle.getFileHandle(nextFileName);
+          setStatus(`重新命名失敗：${nextFileName} 已存在。`);
+          return;
+        } catch (error) {
+          if (error?.name !== 'NotFoundError') {
+            throw error;
+          }
+        }
         const blob = await getItemBlob(item);
         await writeFile(await state.folderHandle.getFileHandle(nextFileName, { create: true }), blob);
         await writeFile(await state.folderHandle.getFileHandle(`${nextFileName}.json`, { create: true }), new Blob([JSON.stringify(stripTransientFields(updated), null, 2)], { type: 'application/json' }));
