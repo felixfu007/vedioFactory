@@ -80,47 +80,49 @@
 
         <div class="panel">
           <h2>3. 設定影片參數</h2>
-          <div class="parameter-grid">
-            <label>
-              長度（秒）
-              <input id="durationInput" type="number" min="2" max="30" step="1" value="6" />
-            </label>
-            <label>
-              FPS
-              <select id="fpsInput">
-                <option value="12">12</option>
-                <option value="24" selected>24</option>
-                <option value="30">30</option>
-              </select>
-            </label>
-            <label>
-              解析度
-              <select id="resolutionInput">
-                <option value="1280x720" selected>1280 × 720</option>
-                <option value="1920x1080">1920 × 1080</option>
-                <option value="1080x1080">1080 × 1080</option>
-                <option value="720x1280">720 × 1280</option>
-              </select>
-            </label>
-            <label>
-              品質
-              <select id="qualityInput">
-                <option value="draft">草稿</option>
-                <option value="balanced" selected>平衡</option>
-                <option value="premium">高品質</option>
-              </select>
-            </label>
-            <label>
-              運鏡強度
-              <input id="motionInput" type="range" min="0" max="100" value="55" />
-            </label>
-            <label>
-              文字強調
-              <input id="captionInput" type="range" min="0" max="100" value="65" />
-            </label>
-          </div>
-          <button id="generateButton" type="button" class="primary">生成影片</button>
-          <p id="generationStatus" class="status-text">尚未開始生成。</p>
+          <form id="generationForm" class="panel">
+            <div class="parameter-grid">
+              <label>
+                長度（秒）
+                <input id="durationInput" type="number" min="2" max="30" step="1" value="6" />
+              </label>
+              <label>
+                FPS
+                <select id="fpsInput">
+                  <option value="12">12</option>
+                  <option value="24" selected>24</option>
+                  <option value="30">30</option>
+                </select>
+              </label>
+              <label>
+                解析度
+                <select id="resolutionInput">
+                  <option value="1280x720" selected>1280 × 720</option>
+                  <option value="1920x1080">1920 × 1080</option>
+                  <option value="1080x1080">1080 × 1080</option>
+                  <option value="720x1280">720 × 1280</option>
+                </select>
+              </label>
+              <label>
+                品質
+                <select id="qualityInput">
+                  <option value="draft">草稿</option>
+                  <option value="balanced" selected>平衡</option>
+                  <option value="premium">高品質</option>
+                </select>
+              </label>
+              <label>
+                運鏡強度
+                <input id="motionInput" type="range" min="0" max="100" value="55" />
+              </label>
+              <label>
+                文字強調
+                <input id="captionInput" type="range" min="0" max="100" value="65" />
+              </label>
+            </div>
+            <button id="generateButton" type="submit" class="primary">生成影片</button>
+            <p id="generationStatus" class="status-text">尚未開始生成。</p>
+          </form>
         </div>
 
         <div class="panel">

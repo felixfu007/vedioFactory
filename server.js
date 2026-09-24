@@ -153,6 +153,12 @@ const contentTypes = {
   '.webm': 'video/webm',
 };
 
+function createRequestError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
@@ -169,12 +175,12 @@ function getContentType(filePath) {
 
 function normalizeOutputDir(outputDir) {
   if (typeof outputDir !== 'string' || !outputDir.trim()) {
-    throw new Error('請提供輸出資料夾路徑。');
+    throw createRequestError('請提供輸出資料夾路徑。');
   }
 
   const resolved = path.resolve(outputDir.trim());
   if (!path.isAbsolute(resolved)) {
-    throw new Error('輸出資料夾必須是絕對路徑。');
+    throw createRequestError('輸出資料夾必須是絕對路徑。');
   }
 
   return resolved;
@@ -182,12 +188,12 @@ function normalizeOutputDir(outputDir) {
 
 function sanitizeFileName(fileName) {
   if (typeof fileName !== 'string' || !fileName.trim()) {
-    throw new Error('缺少檔名。');
+    throw createRequestError('缺少檔名。');
   }
 
   const normalized = path.basename(fileName.trim()).replace(/[\\/]+/g, '');
   if (!normalized.endsWith('.webm')) {
-    throw new Error('影片檔名必須以 .webm 結尾。');
+    throw createRequestError('影片檔名必須以 .webm 結尾。');
   }
 
   return normalized;
@@ -217,7 +223,7 @@ async function readJsonBody(request) {
   for await (const chunk of request) {
     size += chunk.length;
     if (size > MAX_JSON_BODY) {
-      throw new Error('請求內容過大。');
+      throw createRequestError('請求內容過大。');
     }
     chunks.push(chunk);
   }
@@ -227,7 +233,7 @@ async function readJsonBody(request) {
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new Error('JSON 格式錯誤。');
+    throw createRequestError('JSON 格式錯誤。');
   }
 }
 
@@ -274,7 +280,10 @@ async function detectNvidiaRuntime() {
       { timeout: 2_500 },
     );
     const [firstLine = ''] = stdout.trim().split(/\r?\n/u);
-    const [name = '', driverVersion = '', memoryTotal = ''] = firstLine.split(',').map((item) => item.trim());
+    const parts = firstLine.split(',').map((item) => item.trim());
+    const memoryTotal = parts.pop() || '';
+    const driverVersion = parts.pop() || '';
+    const name = parts.join(', ');
     return {
       detected: Boolean(firstLine),
       name,
@@ -689,7 +698,8 @@ function createApp(options = {}) {
 
       await handleStatic(request, response, requestUrl);
     } catch (error) {
-      sendJson(response, 400, { error: error.message || 'Request failed' });
+      const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;
+      sendJson(response, statusCode, { error: error.message || 'Request failed' });
     }
   });
 

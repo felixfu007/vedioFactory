@@ -80,6 +80,7 @@
     ui.motionInput = document.querySelector('#motionInput');
     ui.captionInput = document.querySelector('#captionInput');
     ui.generateButton = document.querySelector('#generateButton');
+    ui.generationForm = document.querySelector('#generationForm');
     ui.generationStatus = document.querySelector('#generationStatus');
     ui.libraryGrid = document.querySelector('#libraryGrid');
     ui.libraryEmpty = document.querySelector('#libraryEmpty');
@@ -861,7 +862,11 @@
       state.library = state.library.map((entry) => (entry.id === item.id ? { ...updated, previewUrl: entry.previewUrl } : entry));
       serializeLibrary();
       renderLibrary();
-      setStatus(`已重新命名為 ${nextFileName}`);
+      setStatus(
+        item.storageOrigin === 'temporary'
+          ? `已重新命名為 ${nextFileName}（瀏覽器暫存模式下重新整理後會清空）`
+          : `已重新命名為 ${nextFileName}`,
+      );
     } catch (error) {
       console.error(error);
       setStatus(`重新命名失敗：${error.message}`);
@@ -1038,7 +1043,10 @@
 
   function attachEvents() {
     ui.moduleSelect.addEventListener('change', renderModuleDetails);
-    ui.generateButton.addEventListener('click', generateFromForm);
+    ui.generationForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      generateFromForm();
+    });
     ui.connectOutputDirButton.addEventListener('click', connectOutputDir);
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);

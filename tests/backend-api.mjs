@@ -39,10 +39,15 @@ async function main() {
       body: JSON.stringify({}),
     }).then((response) => response.json());
     assert.equal(setupBatch.firstBatchModels.length, 4);
+    assert.equal(setupBatch.provider, 'local-nvidia-cuda');
+    assert.equal(setupBatch.installRoot, catalog.installRoot);
     assert.deepEqual(setupBatch.firstBatchModels.map((model) => model.modelId), ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     for (const manifest of setupBatch.firstBatchModels) {
+      assert.match(manifest.manifestPath, /model-setup/);
       const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
       assert.match(setupManifestText, new RegExp(manifest.modelId));
+      assert.match(setupManifestText, /local-nvidia-cuda/);
+      assert.match(setupManifestText, new RegExp(catalog.installRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
     const setupBatchAgain = await fetch(`${origin}/api/models/setup-batch`, {
       method: 'POST',
