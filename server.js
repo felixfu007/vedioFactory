@@ -188,18 +188,22 @@ async function collectVideoItems(outputDir) {
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.webm.json')) continue;
-    const metadataPath = path.join(outputDir, entry.name);
-    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-    const fileName = sanitizeFileName(metadata.fileName || entry.name.replace(/\.json$/u, ''));
-    const videoPath = path.join(outputDir, fileName);
-    if (!(await fileExists(videoPath))) continue;
-    const stats = await fs.stat(videoPath);
-    items.push({
-      ...metadata,
-      fileName,
-      fileSize: stats.size,
-      previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
-    });
+    try {
+      const metadataPath = path.join(outputDir, entry.name);
+      const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      const fileName = sanitizeFileName(metadata.fileName || entry.name.replace(/\.json$/u, ''));
+      const videoPath = path.join(outputDir, fileName);
+      if (!(await fileExists(videoPath))) continue;
+      const stats = await fs.stat(videoPath);
+      items.push({
+        ...metadata,
+        fileName,
+        fileSize: stats.size,
+        previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
+      });
+    } catch {
+      continue;
+    }
   }
 
   items.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -224,8 +228,12 @@ function createApp(options = {}) {
     const jobs = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      const payload = JSON.parse(await fs.readFile(path.join(jobsDir, entry.name), 'utf8'));
-      jobs.push(payload);
+      try {
+        const payload = JSON.parse(await fs.readFile(path.join(jobsDir, entry.name), 'utf8'));
+        jobs.push(payload);
+      } catch {
+        continue;
+      }
     }
     jobs.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     return jobs;

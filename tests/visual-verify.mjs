@@ -14,7 +14,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const outputDir = path.join(repoRoot, 'visual-output');
 const sampleSvgPath = path.join(outputDir, 'verification-source.svg');
-const chromiumPath = process.env.CHROMIUM_PATH || '/usr/bin/chromium-browser';
 
 const scenarios = [
   {
@@ -36,6 +35,41 @@ const scenarios = [
     threshold: 0.86,
   },
 ];
+
+async function resolveChromiumPath() {
+  if (process.env.CHROMIUM_PATH) {
+    return process.env.CHROMIUM_PATH;
+  }
+
+  const candidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      ]
+    : [
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/bin/google-chrome',
+        '/snap/bin/chromium',
+      ];
+
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(
+    process.platform === 'win32'
+      ? '找不到可用的 Chrome/Edge。請安裝瀏覽器，或設定 CHROMIUM_PATH 指向 chrome.exe / msedge.exe。'
+      : '找不到可用的 Chromium/Chrome。請安裝瀏覽器，或設定 CHROMIUM_PATH 指向可執行檔。',
+  );
+}
 
 async function ensureFixtures() {
   await fs.mkdir(outputDir, { recursive: true });
@@ -180,6 +214,7 @@ async function main() {
   const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir });
   const address = app.server.address();
   const origin = `http://127.0.0.1:${address.port}`;
+  const chromiumPath = await resolveChromiumPath();
 
   const browser = await puppeteer.launch({
     executablePath: chromiumPath,

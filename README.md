@@ -112,7 +112,8 @@ npm start
 ```powershell
 cd C:\path\to\vedioFactory
 npm install
-npm run test:api
+npm test
+npm run test:all
 npm run test:visual
 ```
 
@@ -123,7 +124,7 @@ npm run test:visual
 - 輸出頁面截圖與影片中段畫面截圖到 `visual-output/`
 - 將影片實際畫面與同設定下的參考畫面做相似度比對，確認生成內容與提示詞/描述一致
 
-`npm run test:api` 會額外驗證：
+`npm test` / `npm run test:api` 會額外驗證：
 
 - 後端輸出資料夾設定
 - 影片保存 / 列表
@@ -132,6 +133,11 @@ npm run test:visual
 - 刪除
 - 本機推論 runtime API
 - 本機推論工作 manifest 建立
+
+`npm run test:visual` 會：
+
+- 自動尋找 Windows 常見的 Chrome / Edge 路徑
+- 若找不到瀏覽器，可改用 `CHROMIUM_PATH` 指定瀏覽器執行檔
 
 ## 常見問題
 

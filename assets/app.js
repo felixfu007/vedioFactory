@@ -944,13 +944,13 @@
     renderLibrary();
   }
 
-  window.VedioFactory = {
+  window.VedioFactory = Object.assign(window.VedioFactory ?? {}, {
     registerModule,
     initApp,
     getModuleById,
     getLibrarySnapshot,
     renderReferenceFrame,
-  };
+  });
 
   document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.VedioFactory?.initApp === 'function') {
