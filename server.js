@@ -668,6 +668,118 @@ function createApp(options = {}) {
     }
   }
 
+  function inspectComfyWorkflow(workflow, modelId, hasSourceImage = false) {
+    const errors = [];
+    const warnings = [];
+    const nodes = Object.entries(workflow);
+    if (!nodes.length) errors.push('工作流沒有節點。');
+    const nodeSummaries = [];
+    const placeholders = new Set();
+
+    for (const [nodeId, node] of nodes) {
+      if (!node || typeof node !== 'object' || Array.isArray(node)
+        || typeof node.class_type !== 'string'
+        || !node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) {
+        errors.push(`節點 ${nodeId} 格式不正確；需要 class_type 與 inputs。`);
+        continue;
+      }
+
+      const serializedInputs = JSON.stringify(node.inputs);
+      for (const match of serializedInputs.matchAll(/\{\{([^{}]+)\}\}/gu)) {
+        placeholders.add(match[1].trim());
+      }
+      nodeSummaries.push({
+        id: nodeId,
+        classType: node.class_type,
+      });
+    }
+
+    const supportedPlaceholders = new Set([
+      'prompt',
+      'model_id',
+      'story',
+      'negative_prompt',
+      'width',
+      'height',
+      'duration',
+      'fps',
+      'quality',
+      'motion',
+      'caption_strength',
+      'source_image',
+    ]);
+    const unsupportedPlaceholders = [...placeholders].filter((name) => !supportedPlaceholders.has(name));
+    if (unsupportedPlaceholders.length) {
+      errors.push(`工作流包含不支援的佔位符：${unsupportedPlaceholders.map((name) => `{{${name}}}`).join('、')}`);
+    }
+    if (placeholders.has('source_image') && !hasSourceImage) {
+      errors.push('此工作流需要來源圖片，但目前沒有選取圖片。');
+    }
+    if (!placeholders.has('prompt') && !placeholders.has('story')) {
+      warnings.push('工作流沒有提示詞或影片描述佔位符，網站輸入的文字不會傳入工作流。');
+    }
+    if (!placeholders.has('model_id')) {
+      warnings.push('工作流未使用 {{model_id}}；所選模型只會記錄在工作清單，不會改變工作流中的模型節點。');
+    }
+    const selectedModel = VIDEO_MODEL_CATALOG.find((model) => model.id === modelId);
+    if (selectedModel?.category === 'image-to-video' && !placeholders.has('source_image')) {
+      warnings.push('所選模型以圖生影片為主，但工作流沒有 {{source_image}}；請確認它確實支援目前的輸入方式。');
+    }
+
+    const videoOutputNodes = nodeSummaries.filter(({ classType }) => /video|webm/iu.test(classType));
+    if (!videoOutputNodes.length) {
+      warnings.push('找不到名稱含 video/webm 的節點，請確認工作流有影片輸出節點。');
+    } else {
+      const outputText = videoOutputNodes
+        .map(({ id }) => JSON.stringify(workflow[id].inputs))
+        .join(' ');
+      if (!/webm/iu.test(outputText) && !videoOutputNodes.some(({ classType }) => /webm/iu.test(classType))) {
+        warnings.push('無法從輸出節點設定確認 WebM 格式；目前只有 WebM 會匯入影片庫。');
+      }
+    }
+
+    return {
+      configured: true,
+      ready: errors.length === 0,
+      selectedModelId: modelId,
+      nodeCount: nodeSummaries.length,
+      nodeTypes: [...new Set(nodeSummaries.map(({ classType }) => classType))],
+      placeholders: [...placeholders].sort(),
+      videoOutputNodes,
+      errors,
+      warnings,
+      limitations: [
+        '預檢不會執行 ComfyUI 工作流，也無法確認模型權重、custom nodes、VRAM 或節點間的實際相容性。',
+        '影片輸出節點與 WebM 格式只能依節點名稱/設定做靜態提示，最終仍需實際生成驗證。',
+      ],
+    };
+  }
+
+  async function preflightComfyWorkflow(payload = {}) {
+    const modelId = typeof payload.videoModelId === 'string' && payload.videoModelId
+      ? payload.videoModelId
+      : VIDEO_MODEL_CATALOG[0].id;
+    if (!VIDEO_MODEL_CATALOG.some((model) => model.id === modelId)) {
+      throw createRequestError('找不到所選影片模型。');
+    }
+    if (!comfyUI.workflowPath) {
+      return {
+        configured: false,
+        ready: false,
+        selectedModelId: modelId,
+        nodeCount: 0,
+        nodeTypes: [],
+        placeholders: [],
+        videoOutputNodes: [],
+        errors: ['尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。'],
+        warnings: [],
+        limitations: [],
+      };
+    }
+    const workflow = await loadComfyWorkflow();
+    return inspectComfyWorkflow(workflow, modelId, payload.hasSourceImage === true);
+  }
+
   async function uploadComfySourceImage(dataUrl) {
     const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z\d+/=]+)$/iu.exec(dataUrl);
     if (!match) throw createRequestError('來源圖片僅支援 PNG、JPEG 或 WebP。', 400);
@@ -687,11 +799,13 @@ function createApp(options = {}) {
 
   function applyWorkflowVariables(value, variables) {
     if (typeof value === 'string') {
-      const exactMatch = /^\{\{([a-z_]+)\}\}$/iu.exec(value);
-      if (exactMatch && Object.hasOwn(variables, exactMatch[1])) return variables[exactMatch[1]];
-      return value.replace(/\{\{([a-z_]+)\}\}/giu, (token, key) => (
-        Object.hasOwn(variables, key) ? String(variables[key]) : token
-      ));
+      const exactMatch = /^\{\{([^{}]+)\}\}$/u.exec(value);
+      const exactKey = exactMatch?.[1].trim();
+      if (exactMatch && Object.hasOwn(variables, exactKey)) return variables[exactKey];
+      return value.replace(/\{\{([^{}]+)\}\}/gu, (token, rawKey) => {
+        const key = rawKey.trim();
+        return Object.hasOwn(variables, key) ? String(variables[key]) : token;
+      });
     }
     if (Array.isArray(value)) return value.map((item) => applyWorkflowVariables(item, variables));
     if (value && typeof value === 'object') {
@@ -979,6 +1093,15 @@ function createApp(options = {}) {
         throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
       }
       const workflow = await loadComfyWorkflow();
+      const preflight = inspectComfyWorkflow(
+        workflow,
+        inference.videoModelId,
+        Boolean(inference.sourceImageDataUrl),
+      );
+      if (!preflight.ready) {
+        throw createRequestError(`ComfyUI 工作流預檢失敗：${preflight.errors.join(' ')}`);
+      }
+      job.workflowPreflight = preflight;
       const sourceImage = inference.sourceImageDataUrl
         ? await uploadComfySourceImage(inference.sourceImageDataUrl)
         : '';
@@ -998,7 +1121,7 @@ function createApp(options = {}) {
         source_image: sourceImage,
       };
       const apiWorkflow = applyWorkflowVariables(workflow, variables);
-      if (/\{\{[a-z_]+\}\}/iu.test(JSON.stringify(apiWorkflow))) {
+      if (/\{\{[^{}]+\}\}/u.test(JSON.stringify(apiWorkflow))) {
         throw createRequestError('工作流含有未支援的佔位符。', 400);
       }
       const submission = await requestComfyUI('/prompt', {
@@ -1037,6 +1160,12 @@ function createApp(options = {}) {
     if (requestUrl.pathname === '/api/inference/runtime' && request.method === 'GET') {
       await ensureOutputDir();
       return sendJson(response, 200, await getInferenceRuntime(outputDir, comfyUI));
+    }
+
+    if (requestUrl.pathname === '/api/inference/workflow-check' && request.method === 'POST') {
+      const body = await readJsonBody(request);
+      const report = await preflightComfyWorkflow(body);
+      return sendJson(response, 200, report);
     }
 
     if (requestUrl.pathname === '/api/models/catalog' && request.method === 'GET') {

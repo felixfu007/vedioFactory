@@ -97,6 +97,8 @@
     ui.refreshButton = document.querySelector('#refreshButton');
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
+    ui.workflowCheckButton = document.querySelector('#workflowCheckButton');
+    ui.workflowCheckStatus = document.querySelector('#workflowCheckStatus');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
     ui.modelCatalogSummary = document.querySelector('#modelCatalogSummary');
     ui.modelCatalogGrid = document.querySelector('#modelCatalogGrid');
@@ -781,6 +783,21 @@
         return;
       }
 
+      ui.workflowCheckButton.disabled = true;
+      const workflowCheck = await fetchJson('/api/inference/workflow-check', {
+        method: 'POST',
+        body: JSON.stringify({
+          videoModelId: ui.videoModelSelect.value,
+          hasSourceImage: Boolean(file),
+        }),
+      });
+      renderWorkflowCheck(workflowCheck);
+      ui.workflowCheckButton.disabled = false;
+      if (!workflowCheck.ready) {
+        setInferenceStatus(`工作流預檢未通過：${workflowCheck.errors.join(' ')}`);
+        return;
+      }
+
       const job = await fetchJson('/api/inference/jobs', {
         method: 'POST',
         body: JSON.stringify({
@@ -829,8 +846,39 @@
         }
       }
     } catch (error) {
+      ui.workflowCheckButton.disabled = false;
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
+    }
+  }
+
+  function renderWorkflowCheck(report) {
+    const details = [
+      `預檢：${report.ready ? '通過' : '未通過'}`,
+      `節點：${report.nodeCount}`,
+      `模型：${report.selectedModelId}`,
+      ...report.errors.map((message) => `錯誤：${message}`),
+      ...report.warnings.map((message) => `注意：${message}`),
+    ];
+    ui.workflowCheckStatus.textContent = details.join(' ');
+  }
+
+  async function checkComfyWorkflow() {
+    ui.workflowCheckButton.disabled = true;
+    ui.workflowCheckStatus.textContent = '正在檢查本機 API 工作流…';
+    try {
+      const report = await fetchJson('/api/inference/workflow-check', {
+        method: 'POST',
+        body: JSON.stringify({
+          videoModelId: ui.videoModelSelect.value,
+          hasSourceImage: Boolean(ui.imageInput.files?.[0]),
+        }),
+      });
+      renderWorkflowCheck(report);
+    } catch (error) {
+      ui.workflowCheckStatus.textContent = `工作流檢查失敗：${error.message}`;
+    } finally {
+      ui.workflowCheckButton.disabled = false;
     }
   }
 
@@ -1168,6 +1216,7 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
   }
 

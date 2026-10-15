@@ -28,6 +28,13 @@ async function main() {
     assert.equal(runtime.localGpuPreferred, true);
     assert.equal(runtime.outputDir, managedOutputDir);
     assert.ok(Array.isArray(runtime.guidance));
+    const unconfiguredWorkflow = await fetch(`${origin}/api/inference/workflow-check`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then((response) => response.json());
+    assert.equal(unconfiguredWorkflow.configured, false);
+    assert.equal(unconfiguredWorkflow.ready, false);
 
     const catalog = await fetch(`${origin}/api/models/catalog`).then((response) => response.json());
     assert.equal(catalog.currentProjectStatus.actualIntegratedModels.length, 0);
@@ -270,7 +277,10 @@ async function main() {
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
     await fs.writeFile(workflowPath, JSON.stringify({
-      '1': { inputs: { text: '{{prompt}}', width: '{{width}}', image: '{{source_image}}', model: '{{model_id}}' } },
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+      '2': { class_type: 'ModelLoader', inputs: { model: '{{model_id}}' } },
+      '3': { class_type: 'LoadImage', inputs: { image: '{{source_image}}' } },
+      '4': { class_type: 'SaveWEBM', inputs: { format: 'webm' } },
     }));
     const comfyApp = await startServer({
       port: 0,
@@ -285,6 +295,23 @@ async function main() {
       const comfyRuntime = await fetch(`${comfyAppOrigin}/api/inference/runtime`).then((response) => response.json());
       assert.equal(comfyRuntime.comfyUI.available, true);
       assert.equal(comfyRuntime.comfyUI.workflowConfigured, true);
+      const preflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ videoModelId: 'wan-2.1-t2v-1.3b', hasSourceImage: true }),
+      }).then((response) => response.json());
+      assert.equal(preflight.ready, true);
+      assert.equal(preflight.nodeCount, 4);
+      assert.deepEqual(preflight.placeholders, ['model_id', 'prompt', 'source_image']);
+      assert.deepEqual(preflight.videoOutputNodes, [{ id: '4', classType: 'SaveWEBM' }]);
+      assert.equal(preflight.warnings.length, 0);
+      const noImagePreflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ videoModelId: 'wan-2.1-t2v-1.3b', hasSourceImage: false }),
+      }).then((response) => response.json());
+      assert.equal(noImagePreflight.ready, false);
+      assert.match(noImagePreflight.errors[0], /需要來源圖片/);
       const comfyJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -299,9 +326,8 @@ async function main() {
       assert.equal(comfyJob.status, 'queued');
       assert.equal(comfyJob.comfyPromptId, 'comfy-prompt-123');
       assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
-      assert.equal(comfyWorkflow['1'].inputs.width, 1280);
-      assert.equal(comfyWorkflow['1'].inputs.image, 'upload/test.png');
-      assert.equal(comfyWorkflow['1'].inputs.model, 'wan-2.1-t2v-1.3b');
+      assert.equal(comfyWorkflow['2'].inputs.model, 'wan-2.1-t2v-1.3b');
+      assert.equal(comfyWorkflow['3'].inputs.image, 'upload/test.png');
       const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(queuedJob.status, 'queued');
 
@@ -316,6 +342,17 @@ async function main() {
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
       assert.equal(importedVideos.length, 1);
       assert.match(importedVideos[0].fileName, /\.webm$/u);
+
+      await fs.writeFile(workflowPath, JSON.stringify({
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{unknown_value}}' } },
+      }));
+      const invalidPreflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ videoModelId: 'wan-2.1-t2v-1.3b' }),
+      }).then((response) => response.json());
+      assert.equal(invalidPreflight.ready, false);
+      assert.match(invalidPreflight.errors[0], /不支援的佔位符/);
     } finally {
       await new Promise((resolve) => comfyApp.server.close(resolve));
       await new Promise((resolve) => comfyServer.close(resolve));
