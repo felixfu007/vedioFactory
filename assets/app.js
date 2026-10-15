@@ -933,57 +933,77 @@
 
   async function trimBlob(blob, item, startTime, endTime) {
     const video = document.createElement('video');
-    video.src = URL.createObjectURL(blob);
+    const videoUrl = URL.createObjectURL(blob);
+    let stream;
+    let recorder;
+    let done;
+    video.src = videoUrl;
     video.muted = true;
     video.playsInline = true;
     video.crossOrigin = 'anonymous';
-    await new Promise((resolve) => {
-      video.addEventListener('loadedmetadata', resolve, { once: true });
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        video.addEventListener('loadedmetadata', resolve, { once: true });
+        video.addEventListener('error', () => reject(new Error('載入剪輯來源影片失敗。')), { once: true });
+      });
 
-    const safeStart = Math.max(0, Math.min(startTime, video.duration - 0.1));
-    const safeEnd = Math.max(safeStart + 0.2, Math.min(endTime, video.duration));
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || item.width;
-    canvas.height = video.videoHeight || item.height;
-    const ctx = canvas.getContext('2d');
-    const stream = canvas.captureStream(item.fps);
-    const mimeType = getSupportedMimeType();
-    const chunks = [];
-    const recorder = new MediaRecorder(stream, mimeType ? {
-      mimeType,
-      videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
-    } : {
-      videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
-    });
+      const safeStart = Math.max(0, Math.min(startTime, video.duration - 0.1));
+      const safeEnd = Math.max(safeStart + 0.2, Math.min(endTime, video.duration));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || item.width;
+      canvas.height = video.videoHeight || item.height;
+      const ctx = canvas.getContext('2d');
+      stream = canvas.captureStream(item.fps);
+      const mimeType = getSupportedMimeType();
+      const chunks = [];
+      recorder = new MediaRecorder(stream, mimeType ? {
+        mimeType,
+        videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
+      } : {
+        videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
+      });
 
-    recorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    });
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      });
 
-    const done = new Promise((resolve) => {
-      recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
-    });
+      done = new Promise((resolve, reject) => {
+        recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
+        recorder.addEventListener('error', (event) => reject(event.error || new Error('影片剪輯失敗。')), { once: true });
+      });
 
-    recorder.start();
-    video.currentTime = safeStart;
-    await new Promise((resolve) => {
-      video.addEventListener('seeked', resolve, { once: true });
-    });
+      recorder.start();
+      video.currentTime = safeStart;
+      await new Promise((resolve, reject) => {
+        video.addEventListener('seeked', resolve, { once: true });
+        video.addEventListener('error', () => reject(new Error('定位剪輯起點失敗。')), { once: true });
+      });
 
-    await video.play().catch(() => undefined);
-    while (video.currentTime < safeEnd) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      await wait(1000 / item.fps);
+      await video.play().catch(() => undefined);
+      while (video.currentTime < safeEnd) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        await wait(1000 / item.fps);
+      }
+
+      video.pause();
+      recorder.stop();
+      return {
+        blob: await done,
+        duration: Number((safeEnd - safeStart).toFixed(1)),
+      };
+    } catch (error) {
+      if (recorder?.state !== 'inactive') {
+        recorder.stop();
+        await done?.catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      video.pause();
+      stream?.getTracks().forEach((track) => track.stop());
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(videoUrl);
     }
-
-    video.pause();
-    recorder.stop();
-    URL.revokeObjectURL(video.src);
-    return {
-      blob: await done,
-      duration: Number((safeEnd - safeStart).toFixed(1)),
-    };
   }
 
   async function clipItem(item, startTime, endTime) {
