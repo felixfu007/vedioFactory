@@ -176,9 +176,10 @@ async function main() {
     assert.equal(await fs.access(path.join(managedOutputDir, 'interrupted.webm')).then(() => true, () => false), false);
 
     const listed = await fetch(`${origin}/api/videos`).then((response) => response.json());
-    assert.equal(listed.length, 1);
-    assert.equal(listed[0].fileName, item.fileName);
-    assert.match(listed[0].previewUrl, /\/api\/videos\/api-test\.webm/);
+    assert.equal(listed.length, 2);
+    assert.ok(listed.some((entry) => entry.fileName === item.fileName));
+    assert.ok(listed.some((entry) => entry.fileName === binaryItem.fileName));
+    assert.match(listed.find((entry) => entry.fileName === item.fileName).previewUrl, /\/api\/videos\/api-test\.webm/);
 
     await fs.writeFile(path.join(managedOutputDir, 'broken.webm.json'), '{');
     await fs.writeFile(path.join(managedOutputDir, 'orphan.webm.json'), JSON.stringify({
@@ -186,7 +187,7 @@ async function main() {
       fileName: 'orphan.webm',
     }, null, 2));
     const stillListed = await fetch(`${origin}/api/videos`).then((response) => response.json());
-    assert.equal(stillListed.length, 1);
+    assert.equal(stillListed.length, 2);
 
     const renamed = await fetch(`${origin}/api/videos/${encodeURIComponent(item.fileName)}`, {
       method: 'PATCH',
@@ -234,6 +235,10 @@ async function main() {
       method: 'DELETE',
     }).then((response) => response.json());
     assert.equal(deleted.ok, true);
+    const deletedBinary = await fetch(`${origin}/api/videos/${encodeURIComponent(binaryItem.fileName)}`, {
+      method: 'DELETE',
+    }).then((response) => response.json());
+    assert.equal(deletedBinary.ok, true);
 
     const inferenceJob = await fetch(`${origin}/api/inference/jobs`, {
       method: 'POST',
