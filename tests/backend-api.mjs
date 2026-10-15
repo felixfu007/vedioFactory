@@ -40,6 +40,20 @@ async function main() {
     assert.equal(runtime.localGpuPreferred, true);
     assert.equal(runtime.outputDir, managedOutputDir);
     assert.ok(Array.isArray(runtime.guidance));
+    const dockerHostApp = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+      outputDir: managedOutputDir,
+      comfyUIUrl: 'http://host.docker.internal:8188',
+    });
+    try {
+      const dockerHostRuntime = await fetch(
+        `http://127.0.0.1:${dockerHostApp.server.address().port}/api/inference/runtime`,
+      ).then((response) => response.json());
+      assert.equal(dockerHostRuntime.comfyUI.url, 'http://host.docker.internal:8188');
+    } finally {
+      await new Promise((resolve, reject) => dockerHostApp.server.close((error) => error ? reject(error) : resolve()));
+    }
     const unconfiguredWorkflow = await fetch(`${origin}/api/inference/workflow-check`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
