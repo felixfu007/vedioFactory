@@ -19,6 +19,7 @@ const DEFAULT_MODEL_DIR = path.resolve(
   process.env.VEDIO_FACTORY_MODEL_DIR || path.join(os.homedir(), 'vedioFactory', 'models'),
 );
 const MAX_JSON_BODY = 80 * 1024 * 1024;
+const MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024;
 const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
 const MODEL_SETUP_DIR_NAME = 'model-setup';
 const MAX_COMFY_WORKFLOW_BYTES = 10 * 1024 * 1024;
@@ -396,6 +397,48 @@ async function readJsonBody(request) {
   }
 }
 
+function parseVideoMetadataHeader(value) {
+  if (typeof value !== 'string' || !value) {
+    throw createRequestError('缺少影片 metadata。');
+  }
+
+  try {
+    const metadata = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      throw new Error('Invalid metadata');
+    }
+    return metadata;
+  } catch {
+    throw createRequestError('影片 metadata 格式錯誤。');
+  }
+}
+
+async function receiveVideoUpload(request, temporaryPath, maxBytes) {
+  const contentLength = Number(request.headers['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    request.resume();
+    throw createRequestError('影片檔案過大。', 413);
+  }
+
+  let size = 0;
+  const sizeLimiter = new Transform({
+    transform(chunk, encoding, callback) {
+      size += chunk.length;
+      if (size > maxBytes) {
+        callback(createRequestError('影片檔案過大。', 413));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+
+  await pipeline(request, sizeLimiter, createWriteStream(temporaryPath, { flags: 'wx' }));
+  if (size === 0) {
+    throw createRequestError('影片檔案不可為空。');
+  }
+  return size;
+}
+
 function getComfyUIConfig(options = {}) {
   const configuredUrl = options.comfyUIUrl || process.env.VEDIO_FACTORY_COMFYUI_URL || 'http://127.0.0.1:8188';
   const workflowPath = options.comfyUIWorkflowPath || process.env.VEDIO_FACTORY_COMFYUI_WORKFLOW || '';
@@ -616,6 +659,7 @@ function createApp(options = {}) {
   const renameLocks = new Map();
   const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
+  const maxVideoUploadBytes = options.maxVideoUploadBytes ?? MAX_VIDEO_UPLOAD_BYTES;
 
   async function ensureOutputDir() {
     await fs.mkdir(outputDir, { recursive: true });
@@ -1089,6 +1133,37 @@ function createApp(options = {}) {
     };
   }
 
+  async function saveStreamedVideoAsset(request, metadataHeader) {
+    const item = parseVideoMetadataHeader(metadataHeader);
+    const fileName = sanitizeFileName(item.fileName);
+    const videoPath = path.join(outputDir, fileName);
+    const metadataPath = path.join(outputDir, `${fileName}.json`);
+    const temporaryToken = crypto.randomUUID();
+    const temporaryVideoPath = path.join(outputDir, `.${temporaryToken}.upload`);
+    const temporaryMetadataPath = path.join(outputDir, `.${temporaryToken}.json`);
+    const persistedItem = { ...item, fileName };
+
+    await ensureOutputDir();
+    try {
+      const fileSize = await receiveVideoUpload(request, temporaryVideoPath, maxVideoUploadBytes);
+      await fs.writeFile(temporaryMetadataPath, JSON.stringify(persistedItem, null, 2), { flag: 'wx' });
+      await fs.rename(temporaryVideoPath, videoPath);
+      await fs.rename(temporaryMetadataPath, metadataPath);
+
+      return {
+        ...persistedItem,
+        fileSize,
+        previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
+      };
+    } catch (error) {
+      await Promise.all([
+        fs.rm(temporaryVideoPath, { force: true }),
+        fs.rm(temporaryMetadataPath, { force: true }),
+      ]);
+      throw error;
+    }
+  }
+
   async function createInferenceJob(payload) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
@@ -1248,6 +1323,12 @@ function createApp(options = {}) {
     }
 
     if (requestUrl.pathname === '/api/videos' && request.method === 'POST') {
+      if (request.headers['content-type'] === 'application/octet-stream') {
+        return sendJson(response, 201, await saveStreamedVideoAsset(
+          request,
+          request.headers['x-video-metadata'],
+        ));
+      }
       const body = await readJsonBody(request);
       if (!body.item || typeof body.videoBase64 !== 'string') {
         throw new Error('缺少影片資料。');
@@ -1371,6 +1452,7 @@ function createApp(options = {}) {
 
       await handleStatic(request, response, requestUrl);
     } catch (error) {
+      if (response.destroyed) return;
       const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;
       sendJson(response, statusCode, { error: error.message || 'Request failed' });
     }

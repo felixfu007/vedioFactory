@@ -316,16 +316,9 @@
     return { width, height };
   }
 
-  function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-        resolve(dataUrl.split(',')[1] ?? '');
-      };
-      reader.onerror = () => reject(reader.error ?? new Error('讀取影片失敗'));
-      reader.readAsDataURL(blob);
-    });
+  function encodeMetadataHeader(metadata) {
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(metadata))));
+    return encoded.replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
   }
 
   async function fetchJson(url, options = {}) {
@@ -467,10 +460,11 @@
       item.previewUrl = `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`;
       await fetchJson('/api/videos', {
         method: 'POST',
-        body: JSON.stringify({
-          item: stripTransientFields(item),
-          videoBase64: await blobToBase64(item.blob),
-        }),
+        headers: {
+          'content-type': 'application/octet-stream',
+          'x-video-metadata': encodeMetadataHeader(stripTransientFields(item)),
+        },
+        body: item.blob,
       });
       return item;
     }

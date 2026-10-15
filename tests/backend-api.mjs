@@ -14,7 +14,12 @@ const repoRoot = path.resolve(__dirname, '..');
 
 async function main() {
   const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-api-'));
-  const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir });
+  const app = await startServer({
+    port: 0,
+    host: '127.0.0.1',
+    outputDir: managedOutputDir,
+    maxVideoUploadBytes: 1024,
+  });
   const address = app.server.address();
   const origin = `http://127.0.0.1:${address.port}`;
 
@@ -118,6 +123,57 @@ async function main() {
       }),
     }).then((response) => response.json());
     assert.equal(created.fileName, item.fileName);
+
+    const binaryItem = { ...item, id: 'binary-upload-id', fileName: 'binary-upload.webm' };
+    const binaryCreatedResponse = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-video-metadata': Buffer.from(JSON.stringify(binaryItem)).toString('base64url'),
+      },
+      body: Buffer.from('streamed-webm-content'),
+    });
+    assert.equal(binaryCreatedResponse.status, 201);
+    const binaryCreated = await binaryCreatedResponse.json();
+    assert.equal(binaryCreated.fileSize, Buffer.byteLength('streamed-webm-content'));
+    assert.equal(await fs.readFile(path.join(managedOutputDir, binaryItem.fileName), 'utf8'), 'streamed-webm-content');
+
+    const oversizedResponse = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-video-metadata': Buffer.from(JSON.stringify({
+          ...item,
+          fileName: 'oversized.webm',
+        })).toString('base64url'),
+      },
+      body: Buffer.alloc(1025),
+    });
+    assert.equal(oversizedResponse.status, 413);
+    assert.equal(await fs.access(path.join(managedOutputDir, 'oversized.webm')).then(() => true, () => false), false);
+
+    await new Promise((resolve) => {
+      const request = http.request(`${origin}/api/videos`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-length': '100',
+          'x-video-metadata': Buffer.from(JSON.stringify({
+            ...item,
+            fileName: 'interrupted.webm',
+          })).toString('base64url'),
+        },
+      }, resolve);
+      request.on('error', resolve);
+      request.write('partial');
+      setTimeout(() => {
+        request.destroy();
+        resolve();
+      }, 10);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal((await fs.readdir(managedOutputDir)).some((name) => name.endsWith('.upload')), false);
+    assert.equal(await fs.access(path.join(managedOutputDir, 'interrupted.webm')).then(() => true, () => false), false);
 
     const listed = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(listed.length, 1);
