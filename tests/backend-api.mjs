@@ -238,6 +238,9 @@ async function main() {
     let comfyWorkflow;
     let comfyRunning = false;
     let comfyFinished = false;
+    let comfyPromptCount = 0;
+    let comfyCancelRequested = false;
+    let comfyCancelPayload;
     const comfyServer = http.createServer(async (request, response) => {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -248,13 +251,26 @@ async function main() {
       } else if (request.url === '/upload/image' && request.method === 'POST') {
         response.end(JSON.stringify({ name: 'test.png', subfolder: 'upload' }));
       } else if (request.url === '/prompt' && request.method === 'POST') {
+        comfyPromptCount += 1;
         comfyWorkflow = JSON.parse(body).prompt;
-        response.end(JSON.stringify({ prompt_id: 'comfy-prompt-123', number: 1 }));
-      } else if (request.url === '/queue') {
         response.end(JSON.stringify({
-          queue_running: comfyRunning ? [[0, 'comfy-prompt-123']] : [],
-          queue_pending: comfyRunning || comfyFinished ? [] : [[0, 'comfy-prompt-123']],
+          prompt_id: comfyPromptCount === 1 ? 'comfy-prompt-123' : 'comfy-prompt-cancel',
+          number: comfyPromptCount,
         }));
+      } else if (request.url === '/queue') {
+        if (request.method === 'POST') {
+          comfyCancelPayload = JSON.parse(body);
+          comfyCancelRequested = true;
+          response.end(JSON.stringify({}));
+        } else {
+          response.end(JSON.stringify({
+            queue_running: comfyRunning ? [[0, 'comfy-prompt-123']] : [],
+            queue_pending: [
+              ...(!comfyRunning && !comfyFinished ? [[0, 'comfy-prompt-123']] : []),
+              ...(comfyPromptCount > 1 && !comfyCancelRequested ? [[1, 'comfy-prompt-cancel']] : []),
+            ],
+          }));
+        }
       } else if (request.url === '/history/comfy-prompt-123') {
         response.end(JSON.stringify(comfyFinished ? {
           'comfy-prompt-123': {
@@ -264,6 +280,8 @@ async function main() {
         } : comfyRunning ? {
           'comfy-prompt-123': { status: { completed: false, status_str: 'running' }, outputs: {} },
         } : {}));
+      } else if (request.url === '/history/comfy-prompt-cancel') {
+        response.end(JSON.stringify({}));
       } else if (request.url.startsWith('/view?')) {
         response.setHeader('content-type', 'video/webm');
         response.end('fake-comfy-webm');
@@ -334,6 +352,11 @@ async function main() {
       comfyRunning = true;
       const runningJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(runningJob.status, 'running');
+      const runningCancelResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/cancel`, {
+        method: 'POST',
+      });
+      assert.equal(runningCancelResponse.status, 409);
+      assert.match((await runningCancelResponse.json()).error, /全域執行/);
       comfyFinished = true;
       const completedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(completedJob.status, 'succeeded', JSON.stringify(completedJob));
@@ -342,6 +365,27 @@ async function main() {
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
       assert.equal(importedVideos.length, 1);
       assert.match(importedVideos[0].fileName, /\.webm$/u);
+
+      const pendingJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '待取消的本機工作',
+          videoModelId: 'wan-2.1-t2v-1.3b',
+          sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+          settings: { resolution: '1280x720', duration: 2, fps: 24 },
+        }),
+      }).then((response) => response.json());
+      assert.equal(pendingJob.status, 'queued');
+      const cancelledResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${pendingJob.id}/cancel`, {
+        method: 'POST',
+      });
+      assert.equal(cancelledResponse.status, 200);
+      const cancelledJob = await cancelledResponse.json();
+      assert.equal(cancelledJob.status, 'cancelled');
+      assert.deepEqual(comfyCancelPayload, { delete: ['comfy-prompt-cancel'] });
+      const persistedCancelledJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${pendingJob.id}`).then((response) => response.json());
+      assert.equal(persistedCancelledJob.status, 'cancelled');
 
       await fs.writeFile(workflowPath, JSON.stringify({
         '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{unknown_value}}' } },

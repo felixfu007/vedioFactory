@@ -1003,6 +1003,37 @@ function createApp(options = {}) {
     }
   }
 
+  async function cancelInferenceJob(jobId) {
+    const job = await getInferenceJob(jobId);
+    if (!job) throw createRequestError('找不到推論工作。', 404);
+    if (!job.comfyPromptId) throw createRequestError('此工作尚未提交至 ComfyUI。', 409);
+    if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+      throw createRequestError(`工作已是終止狀態：${job.status}。`, 409);
+    }
+
+    const queueResponse = await requestComfyUI('/queue');
+    const queue = await queueResponse.json();
+    const promptId = job.comfyPromptId;
+    if ((queue.queue_running || []).some((entry) => Array.isArray(entry) && entry[1] === promptId)) {
+      throw createRequestError('工作已開始執行。ComfyUI 的 interrupt 會中斷全域執行，因此不會由此操作取消。', 409);
+    }
+    const isPending = (queue.queue_pending || []).some((entry) => Array.isArray(entry) && entry[1] === promptId);
+    if (!isPending) {
+      throw createRequestError('工作已不在待執行佇列中，請重新整理工作狀態後再試。', 409);
+    }
+
+    await requestComfyUI('/queue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ delete: [promptId] }),
+    });
+    job.status = 'cancelled';
+    job.updatedAt = new Date().toISOString();
+    job.guidance = '已從 ComfyUI 待執行佇列移除。';
+    await persistInferenceJob(job);
+    return job;
+  }
+
   async function createModelSetupBatch() {
     await ensureOutputDir();
     await ensureModelSetupDir();
@@ -1184,6 +1215,11 @@ function createApp(options = {}) {
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {
       const body = await readJsonBody(request);
       return sendJson(response, 201, await createInferenceJob(body));
+    }
+
+    const cancelJobMatch = /^\/api\/inference\/jobs\/([^/]+)\/cancel$/u.exec(requestUrl.pathname);
+    if (cancelJobMatch && request.method === 'POST') {
+      return sendJson(response, 200, await cancelInferenceJob(decodeURIComponent(cancelJobMatch[1])));
     }
 
     if (requestUrl.pathname.startsWith('/api/inference/jobs/') && request.method === 'GET') {

@@ -97,6 +97,7 @@
     ui.refreshButton = document.querySelector('#refreshButton');
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
+    ui.cancelInferenceButton = document.querySelector('#cancelInferenceButton');
     ui.workflowCheckButton = document.querySelector('#workflowCheckButton');
     ui.workflowCheckStatus = document.querySelector('#workflowCheckStatus');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
@@ -819,6 +820,7 @@
 
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
+      ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
       if (job.comfyPromptId) {
         if (state.inference.pollTimer) window.clearInterval(state.inference.pollTimer);
         const refreshJob = async () => {
@@ -826,6 +828,7 @@
             const updated = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}`, { headers: {} });
             state.inference.lastJob = updated;
             setInferenceStatus(`ComfyUI 工作：${updated.status}${updated.outputs?.length ? `；已匯入 ${updated.outputs.length} 部影片` : ''}`);
+            ui.cancelInferenceButton.hidden = updated.status !== 'queued';
             if (['succeeded', 'failed', 'cancelled'].includes(updated.status)) {
               window.clearInterval(state.inference.pollTimer);
               state.inference.pollTimer = null;
@@ -847,6 +850,7 @@
       }
     } catch (error) {
       ui.workflowCheckButton.disabled = false;
+      ui.cancelInferenceButton.hidden = true;
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
     }
@@ -879,6 +883,29 @@
       ui.workflowCheckStatus.textContent = `工作流檢查失敗：${error.message}`;
     } finally {
       ui.workflowCheckButton.disabled = false;
+    }
+  }
+
+  async function cancelInferenceJob() {
+    const job = state.inference.lastJob;
+    if (!job?.id || !job.comfyPromptId) return;
+    ui.cancelInferenceButton.disabled = true;
+    try {
+      const cancelled = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      state.inference.lastJob = cancelled;
+      ui.cancelInferenceButton.hidden = true;
+      setInferenceStatus(`已取消待執行工作：${cancelled.id}`);
+      if (state.inference.pollTimer) {
+        window.clearInterval(state.inference.pollTimer);
+        state.inference.pollTimer = null;
+      }
+    } catch (error) {
+      setInferenceStatus(`取消工作失敗：${error.message}`);
+    } finally {
+      ui.cancelInferenceButton.disabled = false;
     }
   }
 
@@ -1216,6 +1243,7 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.cancelInferenceButton.addEventListener('click', cancelInferenceJob);
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
   }
