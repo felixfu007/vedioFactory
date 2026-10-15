@@ -557,7 +557,8 @@ function getCurrentProjectModelStatus() {
       provider: 'comfyui-local',
       hasRuntimeDetection: true,
       hasJobManifestPersistence: true,
-      hasRealModelExecution: false,
+      hasComfyUIWorkflowExecution: true,
+      hasIntegratedModelWeights: false,
     },
   };
 }

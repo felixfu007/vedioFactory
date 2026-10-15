@@ -294,7 +294,10 @@
       grid.append(card);
     });
     renderModelCards(catalog.videoModels, ui.videoModelCatalogGrid, true);
-    renderModelCards(catalog.models.filter((model) => model.kind !== 'video-model'), ui.modelCatalogGrid);
+    renderModelCards(
+      catalog.models.filter((model) => model.kind !== 'video-model' && model.id !== 'animatediff'),
+      ui.modelCatalogGrid,
+    );
   }
 
   function setGeneratingState(isGenerating) {

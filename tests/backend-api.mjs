@@ -31,6 +31,8 @@ async function main() {
 
     const catalog = await fetch(`${origin}/api/models/catalog`).then((response) => response.json());
     assert.equal(catalog.currentProjectStatus.actualIntegratedModels.length, 0);
+    assert.equal(catalog.currentProjectStatus.inferenceScaffold.hasComfyUIWorkflowExecution, true);
+    assert.equal(catalog.currentProjectStatus.inferenceScaffold.hasIntegratedModelWeights, false);
     assert.deepEqual(catalog.firstBatchOrder, ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     assert.equal(catalog.models.some((model) => model.id === 'sdxl'), true);
     assert.equal(catalog.videoModels.length, 10);

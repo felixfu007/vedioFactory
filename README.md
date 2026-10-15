@@ -128,6 +128,7 @@ VRAM 提示是初步規劃，不是硬體相容保證。量化方式、解析度
 `GET /api/models/catalog` 回傳模型目錄；`POST /api/models/setup-batch` 只為下列輔助元件產生規劃 manifest，不會安裝或下載權重：
 
 - `sdxl`
+- `animatediff`
 - `realesrgan`
 - `rife`
 
