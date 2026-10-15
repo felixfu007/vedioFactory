@@ -274,13 +274,13 @@ async function main() {
           prompt: '本機 ComfyUI 測試',
           moduleId: 'cinematic-motion',
           sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
-          settings: { resolution: '640x360', duration: 2, fps: 24 },
+          settings: { resolution: '1280x720', duration: 2, fps: 24 },
         }),
       }).then((response) => response.json());
       assert.equal(comfyJob.status, 'queued');
       assert.equal(comfyJob.comfyPromptId, 'comfy-prompt-123');
       assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
-      assert.equal(comfyWorkflow['1'].inputs.width, 640);
+      assert.equal(comfyWorkflow['1'].inputs.width, 1280);
       assert.equal(comfyWorkflow['1'].inputs.image, 'upload/test.png');
       const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(queuedJob.status, 'queued');

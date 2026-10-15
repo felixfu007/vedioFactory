@@ -22,7 +22,7 @@
 - NVIDIA 顯示卡（你的目標機器可用 RTX 5070 Ti）
 - 最新版 NVIDIA Driver
 - CUDA Toolkit 12.x
-- Python 3.11（未來接本機推論命令時建議）
+- ComfyUI（本機安裝模型與相容的 Python/CUDA 執行環境）
 
 ## Windows 11 安裝與啟動
 
@@ -208,24 +208,15 @@ npm run test:visual
 
 ### 2. 為什麼現在還不是真的 AI 模型出片？
 
-目前做的是 **本機 CUDA 推論骨架**，先把：
+目前已提供 **本機 ComfyUI 工作流 API 整合**。要實際生成模型影片，還需要：
 
-- Windows 11 路徑
-- 本機 GPU 偵測
-- 本機推論工作管理
-- 前後端整合介面
-
-準備好。下一步才是把你的實際模型流程接進來。
+- 啟動本機 ComfyUI 並安裝模型/所需自訂節點
+- 匯出 API 格式工作流並設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`
+- 在工作流使用支援的佔位符與 WebM 輸出節點
 
 ### 3. 如果我要換模型怎麼做？
 
-保持現在的後端與前端不變，改你的：
-
-- 本機推論命令
-- 模型目錄
-- 命令列參數
-
-即可。
+匯出另一份 ComfyUI API 格式工作流，更新 `VEDIO_FACTORY_COMFYUI_WORKFLOW` 後重新啟動 vedioFactory。模型、節點與 VRAM 需求由該工作流及本機 ComfyUI 安裝決定。
 
 ## 模組擴充
 

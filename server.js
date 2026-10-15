@@ -1,11 +1,10 @@
 const http = require('node:http');
-const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const { createWriteStream } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Readable } = require('node:stream');
+const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { URL } = require('node:url');
 
@@ -241,19 +240,6 @@ async function readJsonBody(request) {
   }
 }
 
-function execFileAsync(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, options, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve({ stdout, stderr });
-    });
-  });
-}
-
 function getComfyUIConfig(options = {}) {
   const configuredUrl = options.comfyUIUrl || process.env.VEDIO_FACTORY_COMFYUI_URL || 'http://127.0.0.1:8188';
   const workflowPath = options.comfyUIWorkflowPath || process.env.VEDIO_FACTORY_COMFYUI_WORKFLOW || '';
@@ -280,6 +266,52 @@ function getComfyUIConfig(options = {}) {
     configuredUrl,
     workflowPath: workflowPath ? path.resolve(workflowPath) : '',
     error,
+  };
+}
+
+function validateInferencePayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw createRequestError('推論工作資料格式錯誤。');
+  }
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
+  const story = typeof payload.story === 'string' ? payload.story.trim() : '';
+  if ((!prompt && !story) || prompt.length > 5_000 || story.length > 5_000) {
+    throw createRequestError('提示詞與影片描述至少填一項，且不可超過 5,000 字。');
+  }
+  if (payload.sourceImageDataUrl && (
+    typeof payload.sourceImageDataUrl !== 'string'
+    || payload.sourceImageDataUrl.length > 28 * 1024 * 1024
+  )) {
+    throw createRequestError('來源圖片資料格式錯誤或超過 20 MB。', 413);
+  }
+  const settings = payload.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
+    ? payload.settings
+    : {};
+  const duration = Number(settings.duration ?? 6);
+  const fps = Number(settings.fps ?? 24);
+  const resolution = String(settings.resolution || '1280x720');
+  const quality = String(settings.quality || 'balanced');
+  const motion = Number(settings.motion ?? 0);
+  const captionStrength = Number(settings.captionStrength ?? 0);
+  if (!Number.isInteger(duration) || duration < 2 || duration > 30) {
+    throw createRequestError('影片長度必須介於 2 至 30 秒。');
+  }
+  if (![12, 24, 30].includes(fps)) throw createRequestError('FPS 僅支援 12、24 或 30。');
+  if (!['1280x720', '1920x1080', '1080x1080', '720x1280'].includes(resolution)) {
+    throw createRequestError('不支援此影片解析度。');
+  }
+  if (!['draft', 'balanced', 'premium'].includes(quality)) {
+    throw createRequestError('不支援此影片品質設定。');
+  }
+  if (![motion, captionStrength].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
+    throw createRequestError('運鏡與文字強度必須介於 0 至 100。');
+  }
+  return {
+    prompt,
+    story,
+    moduleId: typeof payload.moduleId === 'string' ? payload.moduleId.slice(0, 100) : '',
+    sourceImageDataUrl: payload.sourceImageDataUrl || '',
+    settings: { duration, fps, resolution, quality, motion, captionStrength },
   };
 }
 
@@ -417,6 +449,7 @@ async function collectVideoItems(outputDir) {
 function createApp(options = {}) {
   let outputDir = normalizeOutputDir(options.outputDir || DEFAULT_OUTPUT_DIR);
   const renameLocks = new Map();
+  const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
 
   async function ensureOutputDir() {
@@ -537,7 +570,7 @@ function createApp(options = {}) {
       const response = await requestComfyUI(`/view?${query}`, {
         signal: AbortSignal.timeout(120_000),
       });
-      const fileName = sanitizeFileName(`comfyui-${job.comfyPromptId.slice(0, 8)}-${index + 1}.webm`);
+      const fileName = sanitizeFileName(`comfyui-${job.id.slice(0, 8)}-${index + 1}.webm`);
       const videoPath = path.join(outputDir, fileName);
       const temporaryPath = `${videoPath}.${crypto.randomUUID()}.tmp`;
       let stats;
@@ -546,7 +579,22 @@ function createApp(options = {}) {
         if (contentLength > 2 * 1024 * 1024 * 1024) {
           throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
         }
-        await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath, { flags: 'wx' }));
+        let bytesWritten = 0;
+        const sizeLimit = new Transform({
+          transform(chunk, encoding, callback) {
+            bytesWritten += chunk.length;
+            if (bytesWritten > 2 * 1024 * 1024 * 1024) {
+              callback(createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413));
+              return;
+            }
+            callback(null, chunk);
+          },
+        });
+        await pipeline(
+          Readable.fromWeb(response.body),
+          sizeLimit,
+          createWriteStream(temporaryPath, { flags: 'wx' }),
+        );
         stats = await fs.stat(temporaryPath);
         if (stats.size > 2 * 1024 * 1024 * 1024) {
           throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
@@ -665,7 +713,15 @@ function createApp(options = {}) {
   async function getInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const job = jobs.find((item) => item.id === jobId) || null;
-    return job?.comfyPromptId ? refreshComfyInferenceJob(job) : job;
+    if (!job?.comfyPromptId) return job;
+    if (!inferenceRefreshes.has(jobId)) {
+      inferenceRefreshes.set(jobId, refreshComfyInferenceJob(job));
+    }
+    try {
+      return await inferenceRefreshes.get(jobId);
+    } finally {
+      inferenceRefreshes.delete(jobId);
+    }
   }
 
   async function createModelSetupBatch() {
@@ -727,6 +783,7 @@ function createApp(options = {}) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
 
+    const inference = validateInferencePayload(payload);
     const runtime = await getInferenceRuntime(outputDir, comfyUI);
     const jobId = crypto.randomUUID();
     const job = {
@@ -735,11 +792,11 @@ function createApp(options = {}) {
       provider: 'comfyui-local',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      prompt: payload.prompt || '',
-      story: payload.story || '',
-      moduleId: payload.moduleId || '',
-      settings: payload.settings || {},
-      sourceImageAttached: Boolean(payload.sourceImageDataUrl),
+      prompt: inference.prompt,
+      story: inference.story,
+      moduleId: inference.moduleId,
+      settings: inference.settings,
+      sourceImageAttached: Boolean(inference.sourceImageDataUrl),
       modelDir: runtime.modelDir,
       workflowConfigured: runtime.workflowConfigured,
       comfyUIUrl: comfyUI.baseUrl,
@@ -756,8 +813,8 @@ function createApp(options = {}) {
         throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
       }
       const workflow = await loadComfyWorkflow();
-      const sourceImage = payload.sourceImageDataUrl
-        ? await uploadComfySourceImage(payload.sourceImageDataUrl)
+      const sourceImage = inference.sourceImageDataUrl
+        ? await uploadComfySourceImage(inference.sourceImageDataUrl)
         : '';
       const resolution = String(job.settings.resolution || '1280x720').split('x').map(Number);
       const variables = {
