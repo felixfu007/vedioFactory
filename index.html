@@ -128,6 +128,10 @@
         <div class="panel">
           <h2>4. 本機 ComfyUI 推論</h2>
           <div id="inferenceRuntime" class="module-details"></div>
+          <label>
+            影片模型建議
+            <select id="videoModelSelect"></select>
+          </label>
           <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
           <p id="inferenceStatus" class="status-text">尚未建立任何推論工作。</p>
         </div>
@@ -142,6 +146,10 @@
           <button id="setupModelBatchButton" type="button" class="secondary">建立首批模型整合清單</button>
         </div>
         <div id="modelCatalogSummary" class="empty-state">尚未載入模型規劃資料。</div>
+        <h3>本機影片生成模型（10 選）</h3>
+        <p class="hint">這些是模型與工作流建議，尚未代表模型權重已安裝或驗證。請選擇相符的 ComfyUI API 工作流。</p>
+        <div id="videoModelCatalogGrid" class="library-grid"></div>
+        <h3>其他工作流元件</h3>
         <div id="modelCatalogGrid" class="library-grid"></div>
         <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
       </section>

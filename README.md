@@ -91,6 +91,7 @@ npm start
 API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 可放在載入圖片節點的圖片欄位：
 
 - `{{prompt}}`、`{{story}}`、`{{negative_prompt}}`
+- `{{model_id}}`
 - `{{width}}`、`{{height}}`、`{{duration}}`、`{{fps}}`
 - `{{quality}}`、`{{motion}}`、`{{caption_strength}}`
 - `{{source_image}}`
@@ -99,68 +100,36 @@ API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 
 
 安全限制：目前只允許 HTTP 連線至 `localhost`、`127.0.0.1` 或 `::1`，不會將工作流或圖片送往第三方服務。尚未設定工作流時，介面只會建立標示為 `scaffolded` 的工作，不代表已執行模型。
 
-## 模型整合規劃表
+## 本機影片模型選擇
 
-### 目前專案狀態
+模型規劃介面列出 10 種本機文生影片/圖生影片選項。可從介面選擇模型，並將模型 ID 傳入 API 工作流的 `{{model_id}}` 佔位符。
 
-- 真正已整合的 AI 模型：**0**
-- 已完成的內容：
-  - 前端視覺模組：`cinematic-motion`、`storyboard-focus`、`neon-pulse`
-  - 本機 ComfyUI API 工作流提交與 WebM 匯入
-  - 本機模型規劃與首批整合 manifest 建立 API
+### 建議測試順序（假設 RTX 5070 Ti 16GB VRAM）
 
-### 建議整合順序
+1. **Wan 2.2 TI2V-5B** — 文生/圖生影片皆可，建議先測短片與較低解析度。
+2. **FramePack-F1** — 可從圖片逐段生成；官方 Windows 桌面程式和 ComfyUI 整合是不同路線。
+3. **Wan 2.1 T2V-1.3B** — 小型文生影片選擇，適合驗證流程。
+4. **LTX-Video 0.9.8** — 支援多種條件控制，須配對正確模型與節點。
+5. **LTX-2** — 支援影音相關工作流；先驗證 ComfyUI 版本及 16GB 顯存可行性。
+6. **HunyuanVideo-1.5** — 有官方 ComfyUI 指引；建議從較低負載設定測試。
+7. **CogVideoX1.5-5B-I2V** — 圖生影片專用選擇，須確認相容節點及權重授權。
+8. **AnimateDiff** — 適合短動畫與風格實驗，需安裝對應 motion module/節點。
+9. **Stable Video Diffusion XT** — 較早期的圖生短片模型，可作基準比較。
+10. **Mochi 1** — 約 10B 模型，官方範例會使用 CPU 卸載，不建議作為 16GB 顯卡的第一個目標。
 
-1. **SDXL**
-   - 用途：文生圖、圖生圖、首幀/關鍵影格生成
-   - 適合先落地：是
-2. **AnimateDiff**
-   - 用途：照片轉短片、局部運鏡、角色動態
-   - 適合先落地：是
-3. **Real-ESRGAN**
-   - 用途：放大、修復、細節增強
-   - 適合先落地：是
-4. **RIFE**
-   - 用途：補幀、提升流暢度、延長片段
-   - 適合先落地：是
-5. **Wan 2.1**
-   - 用途：高品質文生影片 / 圖生影片
-   - 屬於進階擴充：是
-6. **CogVideoX**
-   - 用途：主力影片生成候選
-   - 屬於進階擴充：是
-7. **ControlNet**
-   - 用途：姿勢、構圖、邊緣控制
-   - 屬於進階擴充：是
-8. **IP-Adapter**
-   - 用途：人物/產品一致性、參考圖保持
-   - 屬於進階擴充：是
+VRAM 提示是初步規劃，不是硬體相容保證。量化方式、解析度、影格數、ComfyUI 節點與 CPU 卸載都會影響實際顯存和速度。模型權重授權可能與程式碼授權不同，商用前請查閱該版本的模型授權。
 
-### 第 1 批模型整合（已開始）
+目前專案內真正整合的 AI 模型仍是 **0**。本機 ComfyUI 連線與 API 工作提交已完成；真正出片必須另外安裝模型/節點，選取相符工作流，並設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`。目前只有輸出 WebM 的工作流可自動匯入影片庫。
 
-目前已在後端加入：
+### 輔助模型與後處理元件
 
-- `GET /api/models/catalog`
-  - 回傳目前專案狀態
-  - 回傳推薦模型清單
-  - 回傳第 1 批模型整合順序
-- `POST /api/models/setup-batch`
-  - 會建立第 1 批模型的整合 manifest
-  - 輸出到影片資料夾下的 `model-setup/`
+專案也保留 SDXL（首幀/圖片生成）、Real-ESRGAN（放大修復）、RIFE（補幀）、ControlNet/IP-Adapter（條件控制）等工作流元件；它們不計入上述 10 個影片模型選項。
 
-第 1 批整合 manifest 會先為以下模型建立本機整合骨架：
+`GET /api/models/catalog` 回傳模型目錄；`POST /api/models/setup-batch` 只為下列輔助元件產生規劃 manifest，不會安裝或下載權重：
 
 - `sdxl`
-- `animatediff`
 - `realesrgan`
 - `rife`
-
-這些 manifest 的用途是：
-
-- 固定安裝目錄
-- 固定推薦用途
-- 固定整合順序
-- 當作後續接本機 Python / ComfyUI / ONNX / NCNN 流程的入口
 
 ## 驗證與測試
 

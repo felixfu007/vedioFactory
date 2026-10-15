@@ -100,6 +100,8 @@
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
     ui.modelCatalogSummary = document.querySelector('#modelCatalogSummary');
     ui.modelCatalogGrid = document.querySelector('#modelCatalogGrid');
+    ui.videoModelCatalogGrid = document.querySelector('#videoModelCatalogGrid');
+    ui.videoModelSelect = document.querySelector('#videoModelSelect');
     ui.modelCatalogStatus = document.querySelector('#modelCatalogStatus');
     ui.setupModelBatchButton = document.querySelector('#setupModelBatchButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
@@ -218,6 +220,7 @@
   function renderModelCatalog() {
     const catalog = state.modelCatalog;
     ui.modelCatalogGrid.innerHTML = '';
+    ui.videoModelCatalogGrid.innerHTML = '';
 
     if (!catalog) {
       ui.modelCatalogSummary.hidden = false;
@@ -228,24 +231,38 @@
 
     ui.setupModelBatchButton.disabled = false;
     ui.modelCatalogSummary.hidden = false;
-    ui.modelCatalogSummary.textContent = `目前真正已整合的 AI 模型數量：${catalog.currentProjectStatus.actualIntegratedModels.length}；建議首批整合順序：${catalog.firstBatchOrder.join(' → ')}`;
+    ui.modelCatalogSummary.textContent = `目前真正已整合的 AI 模型數量：${catalog.currentProjectStatus.actualIntegratedModels.length}；列出 ${catalog.videoModels.length} 個本機影片模型選項。`;
 
-    catalog.models.forEach((model) => {
+    const selectedModelId = ui.videoModelSelect.value;
+    ui.videoModelSelect.replaceChildren();
+    catalog.videoModels.forEach((model) => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.priority}. ${model.name}${model.recommended ? '（優先推薦）' : ''}`;
+      ui.videoModelSelect.append(option);
+    });
+    if (catalog.videoModels.some((model) => model.id === selectedModelId)) {
+      ui.videoModelSelect.value = selectedModelId;
+    } else if (catalog.videoModels.length) {
+      ui.videoModelSelect.value = catalog.videoModels[0].id;
+    }
+
+    const renderModelCards = (models, grid, includeWorkflowNotes = false) => models.forEach((model) => {
       const card = document.createElement('article');
       card.className = 'catalog-card';
 
       const title = document.createElement('h3');
-      title.textContent = model.name;
+      title.textContent = `${model.priority ? `${model.priority}. ` : ''}${model.name}${model.recommended ? '（優先推薦）' : ''}`;
       const note = document.createElement('p');
       note.className = 'video-subtitle';
       note.textContent = model.notes;
       const installPath = document.createElement('p');
       installPath.className = 'summary';
-      installPath.textContent = `安裝目錄：${model.installPath}`;
+      installPath.textContent = `${model.kind === 'video-model' ? '模型參考目錄' : '安裝目錄'}：${model.installPath}`;
 
       const chips = document.createElement('div');
       chips.className = 'catalog-chip-row';
-      [model.category, model.batch, model.status, model.windowsProfile?.vramHint].filter(Boolean).forEach((value) => {
+      [...(model.taskTypes || []), model.category, model.batch, model.status, model.windowsProfile?.vramHint].filter(Boolean).forEach((value) => {
         const chip = document.createElement('span');
         chip.className = 'catalog-chip';
         chip.textContent = value;
@@ -260,8 +277,24 @@
       });
 
       card.append(title, note, chips, installPath, list);
-      ui.modelCatalogGrid.append(card);
+      if (includeWorkflowNotes && model.workflowNotes) {
+        const workflowNote = document.createElement('p');
+        workflowNote.className = 'hint';
+        workflowNote.textContent = model.workflowNotes;
+        card.append(workflowNote);
+      }
+      if (model.sourceUrl) {
+        const source = document.createElement('a');
+        source.href = model.sourceUrl;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+        source.textContent = '官方專案 / 模型頁';
+        card.append(source);
+      }
+      grid.append(card);
     });
+    renderModelCards(catalog.videoModels, ui.videoModelCatalogGrid, true);
+    renderModelCards(catalog.models.filter((model) => model.kind !== 'video-model'), ui.modelCatalogGrid);
   }
 
   function setGeneratingState(isGenerating) {
@@ -751,6 +784,7 @@
           prompt: spec.prompt,
           story: spec.story,
           moduleId: spec.moduleId,
+          videoModelId: ui.videoModelSelect.value,
           sourceImageDataUrl: spec.sourceImageDataUrl,
           settings: {
             duration: spec.duration,

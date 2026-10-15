@@ -33,6 +33,14 @@ async function main() {
     assert.equal(catalog.currentProjectStatus.actualIntegratedModels.length, 0);
     assert.deepEqual(catalog.firstBatchOrder, ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     assert.equal(catalog.models.some((model) => model.id === 'sdxl'), true);
+    assert.equal(catalog.videoModels.length, 10);
+    assert.deepEqual(catalog.videoModels.map((model) => model.priority), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual(catalog.videoModels.slice(0, 3).map((model) => model.id), [
+      'wan-2.2-ti2v-5b',
+      'framepack-f1',
+      'wan-2.1-t2v-1.3b',
+    ]);
+    assert.ok(catalog.videoModels.every((model) => model.sourceUrl && model.taskTypes.length));
 
     const setupBatch = await fetch(`${origin}/api/models/setup-batch`, {
       method: 'POST',
@@ -169,6 +177,7 @@ async function main() {
         prompt: '測試本機推論工作',
         story: '建立本機 GPU 推論骨架工作',
         moduleId: 'storyboard-focus',
+        videoModelId: 'wan-2.1-t2v-1.3b',
         settings: {
           duration: 2,
           resolution: '1280x720',
@@ -176,6 +185,7 @@ async function main() {
       }),
     }).then((response) => response.json());
     assert.equal(inferenceJob.provider, 'comfyui-local');
+    assert.equal(inferenceJob.videoModelId, 'wan-2.1-t2v-1.3b');
     assert.match(inferenceJob.status, /queued|scaffolded/);
 
     const listedJobs = await fetch(`${origin}/api/inference/jobs`).then((response) => response.json());
@@ -206,6 +216,12 @@ async function main() {
     assert.equal(malformedJsonResponse.status, 400);
     const malformedJson = await malformedJsonResponse.json();
     assert.match(malformedJson.error, /JSON 格式錯誤/);
+    const unknownVideoModelResponse = await fetch(`${origin}/api/inference/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'unknown model', videoModelId: 'not-a-model' }),
+    });
+    assert.equal(unknownVideoModelResponse.status, 400);
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
@@ -252,7 +268,7 @@ async function main() {
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
     await fs.writeFile(workflowPath, JSON.stringify({
-      '1': { inputs: { text: '{{prompt}}', width: '{{width}}', image: '{{source_image}}' } },
+      '1': { inputs: { text: '{{prompt}}', width: '{{width}}', image: '{{source_image}}', model: '{{model_id}}' } },
     }));
     const comfyApp = await startServer({
       port: 0,
@@ -273,6 +289,7 @@ async function main() {
         body: JSON.stringify({
           prompt: '本機 ComfyUI 測試',
           moduleId: 'cinematic-motion',
+          videoModelId: 'wan-2.1-t2v-1.3b',
           sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
           settings: { resolution: '1280x720', duration: 2, fps: 24 },
         }),
@@ -282,6 +299,7 @@ async function main() {
       assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
       assert.equal(comfyWorkflow['1'].inputs.width, 1280);
       assert.equal(comfyWorkflow['1'].inputs.image, 'upload/test.png');
+      assert.equal(comfyWorkflow['1'].inputs.model, 'wan-2.1-t2v-1.3b');
       const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(queuedJob.status, 'queued');
 
