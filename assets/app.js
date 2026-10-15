@@ -17,6 +17,9 @@
     inference: {
       runtime: null,
       lastJob: null,
+      pollTimer: null,
+      pollingJobId: '',
+      pollInFlight: false,
     },
     modelCatalog: null,
   };
@@ -96,9 +99,14 @@
     ui.refreshButton = document.querySelector('#refreshButton');
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
+    ui.cancelInferenceButton = document.querySelector('#cancelInferenceButton');
+    ui.workflowCheckButton = document.querySelector('#workflowCheckButton');
+    ui.workflowCheckStatus = document.querySelector('#workflowCheckStatus');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
     ui.modelCatalogSummary = document.querySelector('#modelCatalogSummary');
     ui.modelCatalogGrid = document.querySelector('#modelCatalogGrid');
+    ui.videoModelCatalogGrid = document.querySelector('#videoModelCatalogGrid');
+    ui.videoModelSelect = document.querySelector('#videoModelSelect');
     ui.modelCatalogStatus = document.querySelector('#modelCatalogStatus');
     ui.setupModelBatchButton = document.querySelector('#setupModelBatchButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
@@ -200,7 +208,8 @@
       `平台：${runtime.platform}`,
       `GPU：${runtime.gpu?.detected ? `${runtime.gpu.name || 'NVIDIA'} / ${runtime.gpu.memoryTotal || '未知 VRAM'}` : '尚未偵測到 nvidia-smi'}`,
       `模型目錄：${runtime.modelDir}`,
-      `推論命令：${runtime.engineCommandConfigured ? `${runtime.engineCommand} ${runtime.engineArgs.join(' ')}`.trim() : '尚未設定 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND'}`,
+      `ComfyUI：${runtime.comfyUI?.available ? `已連線 (${runtime.comfyUI.url})` : `未連線 (${runtime.comfyUI?.error || runtime.comfyUI?.url || '未設定'})`}`,
+      `API 工作流：${runtime.comfyUI?.workflowConfigured ? runtime.comfyUI.workflowPath : '尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW'}`,
       `方向：${runtime.provider}`,
     ];
 
@@ -216,6 +225,7 @@
   function renderModelCatalog() {
     const catalog = state.modelCatalog;
     ui.modelCatalogGrid.innerHTML = '';
+    ui.videoModelCatalogGrid.innerHTML = '';
 
     if (!catalog) {
       ui.modelCatalogSummary.hidden = false;
@@ -226,24 +236,38 @@
 
     ui.setupModelBatchButton.disabled = false;
     ui.modelCatalogSummary.hidden = false;
-    ui.modelCatalogSummary.textContent = `目前真正已整合的 AI 模型數量：${catalog.currentProjectStatus.actualIntegratedModels.length}；建議首批整合順序：${catalog.firstBatchOrder.join(' → ')}`;
+    ui.modelCatalogSummary.textContent = `目前真正已整合的 AI 模型數量：${catalog.currentProjectStatus.actualIntegratedModels.length}；列出 ${catalog.videoModels.length} 個本機影片模型選項。`;
 
-    catalog.models.forEach((model) => {
+    const selectedModelId = ui.videoModelSelect.value;
+    ui.videoModelSelect.replaceChildren();
+    catalog.videoModels.forEach((model) => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.priority}. ${model.name}${model.recommended ? '（優先推薦）' : ''}`;
+      ui.videoModelSelect.append(option);
+    });
+    if (catalog.videoModels.some((model) => model.id === selectedModelId)) {
+      ui.videoModelSelect.value = selectedModelId;
+    } else if (catalog.videoModels.length) {
+      ui.videoModelSelect.value = catalog.videoModels[0].id;
+    }
+
+    const renderModelCards = (models, grid, includeWorkflowNotes = false) => models.forEach((model) => {
       const card = document.createElement('article');
       card.className = 'catalog-card';
 
       const title = document.createElement('h3');
-      title.textContent = model.name;
+      title.textContent = `${model.priority ? `${model.priority}. ` : ''}${model.name}${model.recommended ? '（優先推薦）' : ''}`;
       const note = document.createElement('p');
       note.className = 'video-subtitle';
       note.textContent = model.notes;
       const installPath = document.createElement('p');
       installPath.className = 'summary';
-      installPath.textContent = `安裝目錄：${model.installPath}`;
+      installPath.textContent = `${model.kind === 'video-model' ? '模型參考目錄' : '安裝目錄'}：${model.installPath}`;
 
       const chips = document.createElement('div');
       chips.className = 'catalog-chip-row';
-      [model.category, model.batch, model.status, model.windowsProfile?.vramHint].filter(Boolean).forEach((value) => {
+      [...(model.taskTypes || []), model.category, model.batch, model.status, model.windowsProfile?.vramHint].filter(Boolean).forEach((value) => {
         const chip = document.createElement('span');
         chip.className = 'catalog-chip';
         chip.textContent = value;
@@ -258,8 +282,27 @@
       });
 
       card.append(title, note, chips, installPath, list);
-      ui.modelCatalogGrid.append(card);
+      if (includeWorkflowNotes && model.workflowNotes) {
+        const workflowNote = document.createElement('p');
+        workflowNote.className = 'hint';
+        workflowNote.textContent = model.workflowNotes;
+        card.append(workflowNote);
+      }
+      if (model.sourceUrl) {
+        const source = document.createElement('a');
+        source.href = model.sourceUrl;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+        source.textContent = '官方專案 / 模型頁';
+        card.append(source);
+      }
+      grid.append(card);
     });
+    renderModelCards(catalog.videoModels, ui.videoModelCatalogGrid, true);
+    renderModelCards(
+      catalog.models.filter((model) => model.kind !== 'video-model' && model.id !== 'animatediff'),
+      ui.modelCatalogGrid,
+    );
   }
 
   function setGeneratingState(isGenerating) {
@@ -273,16 +316,11 @@
     return { width, height };
   }
 
-  function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-        resolve(dataUrl.split(',')[1] ?? '');
-      };
-      reader.onerror = () => reject(reader.error ?? new Error('讀取影片失敗'));
-      reader.readAsDataURL(blob);
-    });
+  function createVideoUploadBody(metadata, videoBlob) {
+    const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
+    const metadataLength = new Uint8Array(4);
+    new DataView(metadataLength.buffer).setUint32(0, metadataBytes.length);
+    return new Blob([metadataLength, metadataBytes, videoBlob], { type: 'application/octet-stream' });
   }
 
   async function fetchJson(url, options = {}) {
@@ -424,10 +462,8 @@
       item.previewUrl = `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`;
       await fetchJson('/api/videos', {
         method: 'POST',
-        body: JSON.stringify({
-          item: stripTransientFields(item),
-          videoBase64: await blobToBase64(item.blob),
-        }),
+        headers: { 'content-type': 'application/octet-stream' },
+        body: createVideoUploadBody(stripTransientFields(item), item.blob),
       });
       return item;
     }
@@ -451,9 +487,18 @@
     return persisted;
   }
 
+  function releasePreviewUrls(items) {
+    items.forEach((item) => {
+      if (typeof item.previewUrl === 'string' && item.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+  }
+
   async function listFolderItems() {
     if (state.backend.available) {
       const items = await fetchJson('/api/videos');
+      releasePreviewUrls(state.library);
       state.library = items;
       serializeLibrary();
       return items;
@@ -475,6 +520,7 @@
     }
 
     nextLibrary.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    releasePreviewUrls(state.library);
     state.library = nextLibrary;
     serializeLibrary();
     return nextLibrary;
@@ -561,28 +607,39 @@
       if (event.data.size > 0) chunks.push(event.data);
     });
 
-    const done = new Promise((resolve) => {
+    const done = new Promise((resolve, reject) => {
       recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
+      recorder.addEventListener('error', (event) => reject(event.error || new Error('影片錄製失敗')), { once: true });
     });
 
-    recorder.start();
-    const totalFrames = Math.max(1, Math.round(spec.duration * spec.fps));
-    const frameDuration = 1000 / spec.fps;
-    for (let frame = 0; frame < totalFrames; frame += 1) {
-      const progress = frame / Math.max(totalFrames - 1, 1);
-      moduleDefinition.renderFrame({
-        ctx,
-        canvas,
-        progress,
-        image,
-        spec,
-        fitImage,
-        drawCaptionBlock,
-      });
-      await wait(frameDuration);
+    try {
+      recorder.start();
+      const totalFrames = Math.max(1, Math.round(spec.duration * spec.fps));
+      const frameDuration = 1000 / spec.fps;
+      for (let frame = 0; frame < totalFrames; frame += 1) {
+        const progress = frame / Math.max(totalFrames - 1, 1);
+        moduleDefinition.renderFrame({
+          ctx,
+          canvas,
+          progress,
+          image,
+          spec,
+          fitImage,
+          drawCaptionBlock,
+        });
+        await wait(frameDuration);
+      }
+      recorder.stop();
+      return await done;
+    } catch (error) {
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+        await done.catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
     }
-    recorder.stop();
-    return done;
   }
 
   async function createAndStoreVideo(spec, suffix = '') {
@@ -673,6 +730,7 @@
       state.backend.available = true;
       state.backend.outputDir = payload.outputDir;
       state.folderHandle = null;
+      releasePreviewUrls(state.library);
       state.library = payload.items;
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
       state.modelCatalog = await fetchJson('/api/models/catalog', { headers: {} });
@@ -703,6 +761,64 @@
       syncStorageUi();
       renderInferenceRuntime();
       renderModelCatalog();
+      await restoreActiveInferenceJob();
+    }
+  }
+
+  function stopInferenceJobPolling() {
+    if (state.inference.pollTimer) {
+      window.clearInterval(state.inference.pollTimer);
+      state.inference.pollTimer = null;
+    }
+    state.inference.pollingJobId = '';
+    state.inference.pollInFlight = false;
+  }
+
+  function startInferenceJobPolling(job) {
+    stopInferenceJobPolling();
+    if (!job?.comfyPromptId) return;
+    state.inference.pollingJobId = job.id;
+    const refreshJob = async () => {
+      if (state.inference.pollInFlight || state.inference.pollingJobId !== job.id) return;
+      state.inference.pollInFlight = true;
+      try {
+        const updated = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}`, { headers: {} });
+        if (state.inference.pollingJobId !== job.id) return;
+        state.inference.lastJob = updated;
+        setInferenceStatus(`ComfyUI 工作：${updated.status}${updated.outputs?.length ? `；已匯入 ${updated.outputs.length} 部影片` : ''}`);
+        ui.cancelInferenceButton.hidden = updated.status !== 'queued';
+        if (['succeeded', 'failed', 'cancelled'].includes(updated.status)) {
+          stopInferenceJobPolling();
+          if (updated.status === 'succeeded') {
+            await listFolderItems();
+            renderLibrary();
+          }
+        }
+      } catch (error) {
+        setInferenceStatus(`查詢 ComfyUI 工作失敗：${error.message}`);
+        stopInferenceJobPolling();
+      } finally {
+        state.inference.pollInFlight = false;
+      }
+    };
+    refreshJob();
+    state.inference.pollTimer = window.setInterval(refreshJob, 2_500);
+  }
+
+  async function restoreActiveInferenceJob() {
+    if (!state.backend.available) return;
+    try {
+      const jobs = await fetchJson('/api/inference/jobs', { headers: {} });
+      const activeJob = jobs.find((job) => (
+        job.comfyPromptId && ['queued', 'running'].includes(job.status)
+      ));
+      if (!activeJob) return;
+      state.inference.lastJob = activeJob;
+      setInferenceStatus(`恢復追蹤 ComfyUI 工作：${activeJob.id}（${activeJob.status}）`);
+      ui.cancelInferenceButton.hidden = activeJob.status !== 'queued';
+      startInferenceJobPolling(activeJob);
+    } catch (error) {
+      console.warn('Unable to restore active inference job.', error);
     }
   }
 
@@ -721,12 +837,28 @@
         return;
       }
 
+      ui.workflowCheckButton.disabled = true;
+      const workflowCheck = await fetchJson('/api/inference/workflow-check', {
+        method: 'POST',
+        body: JSON.stringify({
+          videoModelId: ui.videoModelSelect.value,
+          hasSourceImage: Boolean(file),
+        }),
+      });
+      renderWorkflowCheck(workflowCheck);
+      ui.workflowCheckButton.disabled = false;
+      if (!workflowCheck.ready) {
+        setInferenceStatus(`工作流預檢未通過：${workflowCheck.errors.join(' ')}`);
+        return;
+      }
+
       const job = await fetchJson('/api/inference/jobs', {
         method: 'POST',
         body: JSON.stringify({
           prompt: spec.prompt,
           story: spec.story,
           moduleId: spec.moduleId,
+          videoModelId: ui.videoModelSelect.value,
           sourceImageDataUrl: spec.sourceImageDataUrl,
           settings: {
             duration: spec.duration,
@@ -741,9 +873,63 @@
 
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
+      ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
+      if (job.comfyPromptId) startInferenceJobPolling(job);
     } catch (error) {
+      ui.workflowCheckButton.disabled = false;
+      ui.cancelInferenceButton.hidden = true;
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
+    }
+  }
+
+  function renderWorkflowCheck(report) {
+    const details = [
+      `預檢：${report.ready ? '通過' : '未通過'}`,
+      `節點：${report.nodeCount}`,
+      `模型：${report.selectedModelId}`,
+      ...report.errors.map((message) => `錯誤：${message}`),
+      ...report.warnings.map((message) => `注意：${message}`),
+    ];
+    ui.workflowCheckStatus.textContent = details.join(' ');
+  }
+
+  async function checkComfyWorkflow() {
+    ui.workflowCheckButton.disabled = true;
+    ui.workflowCheckStatus.textContent = '正在檢查本機 API 工作流…';
+    try {
+      const report = await fetchJson('/api/inference/workflow-check', {
+        method: 'POST',
+        body: JSON.stringify({
+          videoModelId: ui.videoModelSelect.value,
+          hasSourceImage: Boolean(ui.imageInput.files?.[0]),
+        }),
+      });
+      renderWorkflowCheck(report);
+    } catch (error) {
+      ui.workflowCheckStatus.textContent = `工作流檢查失敗：${error.message}`;
+    } finally {
+      ui.workflowCheckButton.disabled = false;
+    }
+  }
+
+  async function cancelInferenceJob() {
+    const job = state.inference.lastJob;
+    if (!job?.id || !job.comfyPromptId) return;
+    ui.cancelInferenceButton.disabled = true;
+    try {
+      const cancelled = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      state.inference.lastJob = cancelled;
+      ui.cancelInferenceButton.hidden = true;
+      setInferenceStatus(`已取消待執行工作：${cancelled.id}`);
+      stopInferenceJobPolling();
+    } catch (error) {
+      setInferenceStatus(`取消工作失敗：${error.message}`);
+    } finally {
+      ui.cancelInferenceButton.disabled = false;
     }
   }
 
@@ -896,6 +1082,7 @@
         await state.folderHandle.removeEntry(`${item.fileName}.json`);
         await listFolderItems();
       } else {
+        releasePreviewUrls([item]);
         state.library = state.library.filter((entry) => entry.id !== item.id);
       }
 
@@ -910,57 +1097,77 @@
 
   async function trimBlob(blob, item, startTime, endTime) {
     const video = document.createElement('video');
-    video.src = URL.createObjectURL(blob);
+    const videoUrl = URL.createObjectURL(blob);
+    let stream;
+    let recorder;
+    let done;
+    video.src = videoUrl;
     video.muted = true;
     video.playsInline = true;
     video.crossOrigin = 'anonymous';
-    await new Promise((resolve) => {
-      video.addEventListener('loadedmetadata', resolve, { once: true });
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        video.addEventListener('loadedmetadata', resolve, { once: true });
+        video.addEventListener('error', () => reject(new Error('載入剪輯來源影片失敗。')), { once: true });
+      });
 
-    const safeStart = Math.max(0, Math.min(startTime, video.duration - 0.1));
-    const safeEnd = Math.max(safeStart + 0.2, Math.min(endTime, video.duration));
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || item.width;
-    canvas.height = video.videoHeight || item.height;
-    const ctx = canvas.getContext('2d');
-    const stream = canvas.captureStream(item.fps);
-    const mimeType = getSupportedMimeType();
-    const chunks = [];
-    const recorder = new MediaRecorder(stream, mimeType ? {
-      mimeType,
-      videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
-    } : {
-      videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
-    });
+      const safeStart = Math.max(0, Math.min(startTime, video.duration - 0.1));
+      const safeEnd = Math.max(safeStart + 0.2, Math.min(endTime, video.duration));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || item.width;
+      canvas.height = video.videoHeight || item.height;
+      const ctx = canvas.getContext('2d');
+      stream = canvas.captureStream(item.fps);
+      const mimeType = getSupportedMimeType();
+      const chunks = [];
+      recorder = new MediaRecorder(stream, mimeType ? {
+        mimeType,
+        videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
+      } : {
+        videoBitsPerSecond: qualityBitrates[item.quality] ?? qualityBitrates.balanced,
+      });
 
-    recorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    });
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      });
 
-    const done = new Promise((resolve) => {
-      recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
-    });
+      done = new Promise((resolve, reject) => {
+        recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
+        recorder.addEventListener('error', (event) => reject(event.error || new Error('影片剪輯失敗。')), { once: true });
+      });
 
-    recorder.start();
-    video.currentTime = safeStart;
-    await new Promise((resolve) => {
-      video.addEventListener('seeked', resolve, { once: true });
-    });
+      recorder.start();
+      video.currentTime = safeStart;
+      await new Promise((resolve, reject) => {
+        video.addEventListener('seeked', resolve, { once: true });
+        video.addEventListener('error', () => reject(new Error('定位剪輯起點失敗。')), { once: true });
+      });
 
-    await video.play().catch(() => undefined);
-    while (video.currentTime < safeEnd) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      await wait(1000 / item.fps);
+      await video.play().catch(() => undefined);
+      while (video.currentTime < safeEnd) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        await wait(1000 / item.fps);
+      }
+
+      video.pause();
+      recorder.stop();
+      return {
+        blob: await done,
+        duration: Number((safeEnd - safeStart).toFixed(1)),
+      };
+    } catch (error) {
+      if (recorder?.state !== 'inactive') {
+        recorder.stop();
+        await done?.catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      video.pause();
+      stream?.getTracks().forEach((track) => track.stop());
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(videoUrl);
     }
-
-    video.pause();
-    recorder.stop();
-    URL.revokeObjectURL(video.src);
-    return {
-      blob: await done,
-      duration: Number((safeEnd - safeStart).toFixed(1)),
-    };
   }
 
   async function clipItem(item, startTime, endTime) {
@@ -1060,6 +1267,8 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.cancelInferenceButton.addEventListener('click', cancelInferenceJob);
+    ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
   }
 

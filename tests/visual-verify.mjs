@@ -103,6 +103,9 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
     await page.reload({ waitUntil: 'networkidle0' });
 
     await page.waitForFunction(() => document.querySelector('#storageMode')?.textContent.includes('後端'));
+    const videoModelCount = await page.$$eval('#videoModelSelect option', (options) => options.length);
+    assert.equal(videoModelCount, 10, 'expected the UI to expose all ten recommended video models');
+    assert.equal(await page.$eval('#cancelInferenceButton', (button) => button.hidden), true);
     await page.type('#promptInput', scenario.prompt);
     await page.type('#storyInput', scenario.story);
     await page.select('#moduleSelect', scenario.moduleId);

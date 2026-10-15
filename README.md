@@ -22,7 +22,7 @@
 - NVIDIA 顯示卡（你的目標機器可用 RTX 5070 Ti）
 - 最新版 NVIDIA Driver
 - CUDA Toolkit 12.x
-- Python 3.11（未來接本機推論命令時建議）
+- ComfyUI（本機安裝模型與相容的 Python/CUDA 執行環境）
 
 ## Windows 11 安裝與啟動
 
@@ -63,14 +63,16 @@ npm start
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
+後端影片庫會以二進位串流保存 WebM，單檔上限為 500 MiB；中斷或超限的上傳不會保留暫存影片。
+
 ## 環境變數
 
 | 變數名 | 預設值 | 說明 |
 | --- | --- | --- |
 | `VEDIO_FACTORY_OUTPUT_DIR` | `%USERPROFILE%\Videos\vedioFactory` | 影片輸出資料夾 |
 | `VEDIO_FACTORY_MODEL_DIR` | `%USERPROFILE%\vedioFactory\models` | 本機模型權重目錄 |
-| `VEDIO_FACTORY_LOCAL_ENGINE_COMMAND` | 空值 | 未來本機推論入口命令 |
-| `VEDIO_FACTORY_LOCAL_ENGINE_ARGS` | 空值 | 推論命令參數 |
+| `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
+| `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | ComfyUI 匯出的 API 格式工作流 JSON 絕對路徑 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `PORT` | `8000` | 服務埠號 |
 
@@ -79,94 +81,66 @@ npm start
 ```powershell
 $env:VEDIO_FACTORY_OUTPUT_DIR="C:\AI\vedioFactory\output"
 $env:VEDIO_FACTORY_MODEL_DIR="C:\AI\vedioFactory\models"
-$env:VEDIO_FACTORY_LOCAL_ENGINE_COMMAND="python"
-$env:VEDIO_FACTORY_LOCAL_ENGINE_ARGS='[".\\local-ai\\run_inference.py","--device","cuda"]'
+$env:VEDIO_FACTORY_COMFYUI_URL="http://127.0.0.1:8188"
+$env:VEDIO_FACTORY_COMFYUI_WORKFLOW="C:\AI\vedioFactory\workflows\video-api.json"
 npm start
 ```
 
-## 本機 NVIDIA / CUDA 推論骨架
+## 本機 ComfyUI 工作流推論
 
-目前已加入一個「骨架版」本機推論流程，目的不是直接完成真實模型推論，而是先把未來要接本機顯卡的結構準備好。
+請先在本機啟動 ComfyUI，並在 ComfyUI 將工作流匯出為 **API 格式 JSON**。在 vedioFactory 啟動前設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`，再從介面建立本機推論工作。
 
-目前可用能力：
+API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 可放在載入圖片節點的圖片欄位：
 
-- 後端會提供 `/api/inference/runtime`
-- 會檢查 `nvidia-smi` 是否可用
-- 會回報目前平台、模型目錄、推論命令是否已設定
-- 前端介面會顯示「本機 NVIDIA / CUDA 推論骨架」狀態
-- 你可以直接從介面建立一筆「本機推論工作」
-- 後端會把推論工作 manifest 寫到輸出資料夾下的 `inference-jobs/`
+- `{{prompt}}`、`{{story}}`、`{{negative_prompt}}`
+- `{{model_id}}`
+- `{{width}}`、`{{height}}`、`{{duration}}`、`{{fps}}`
+- `{{quality}}`、`{{motion}}`、`{{caption_strength}}`
+- `{{source_image}}`
 
-這代表之後要接真正模型時，只需要把：
+按「檢查 ComfyUI 工作流」可在提交前檢查 API 節點結構、未知佔位符、是否選了來源圖片，以及影片/WebM 輸出節點提示。送出工作時也會再次做必要檢查，避免不支援的佔位符或缺少必需來源圖片時先上傳圖片。
 
-- `VEDIO_FACTORY_LOCAL_ENGINE_COMMAND`
-- `VEDIO_FACTORY_LOCAL_ENGINE_ARGS`
-- 模型權重目錄
+推論工作在 ComfyUI 尚未開始執行時可從待執行佇列取消。若工作已在執行，介面會拒絕取消：ComfyUI 的 `/interrupt` 會中斷目前全域執行，可能影響其他工作，因此本專案不會自動呼叫它。
 
-接到你自己的本機推論程式即可，不需要改成第三方 API。
+重新整理頁面或重啟 vedioFactory 後，前端會從 `inference-jobs/` 恢復追蹤最新的待執行/執行中工作。這依賴 ComfyUI 保留對應 prompt history/queue；若 ComfyUI 重啟或清除 queue/history，需手動重新建立工作。
 
-## 模型整合規劃表
+來源圖片會上傳到本機 ComfyUI；ComfyUI 回傳的 `.webm` 輸出會匯入 vedioFactory 的影片資料夾。其他輸出格式目前不會自動匯入。工作狀態會透過 ComfyUI history/queue 查詢，工作 manifest 保存在輸出資料夾下的 `inference-jobs/`。
 
-### 目前專案狀態
+預檢只靜態檢查 JSON 和節點名稱/設定提示，不會執行工作流，不能確認模型權重或 custom nodes 已安裝、模型/節點彼此相容、VRAM 足夠或實際輸出格式正確。仍需在本機 ComfyUI 實際生成驗證。
 
-- 真正已整合的 AI 模型：**0**
-- 已完成的內容：
-  - 前端視覺模組：`cinematic-motion`、`storyboard-focus`、`neon-pulse`
-  - 本機推論骨架：`local-nvidia-cuda`
-  - 本機模型規劃與首批整合 manifest 建立 API
+安全限制：目前只允許 HTTP 連線至 `localhost`、`127.0.0.1` 或 `::1`，不會將工作流或圖片送往第三方服務。尚未設定工作流時，預檢會回報未設定；介面仍可建立標示為 `scaffolded` 的工作，但不代表已執行模型。
 
-### 建議整合順序
+## 本機影片模型選擇
 
-1. **SDXL**
-   - 用途：文生圖、圖生圖、首幀/關鍵影格生成
-   - 適合先落地：是
-2. **AnimateDiff**
-   - 用途：照片轉短片、局部運鏡、角色動態
-   - 適合先落地：是
-3. **Real-ESRGAN**
-   - 用途：放大、修復、細節增強
-   - 適合先落地：是
-4. **RIFE**
-   - 用途：補幀、提升流暢度、延長片段
-   - 適合先落地：是
-5. **Wan 2.1**
-   - 用途：高品質文生影片 / 圖生影片
-   - 屬於進階擴充：是
-6. **CogVideoX**
-   - 用途：主力影片生成候選
-   - 屬於進階擴充：是
-7. **ControlNet**
-   - 用途：姿勢、構圖、邊緣控制
-   - 屬於進階擴充：是
-8. **IP-Adapter**
-   - 用途：人物/產品一致性、參考圖保持
-   - 屬於進階擴充：是
+模型規劃介面列出 10 種本機文生影片/圖生影片選項。可從介面選擇模型，並將模型 ID 傳入 API 工作流的 `{{model_id}}` 佔位符。
 
-### 第 1 批模型整合（已開始）
+### 建議測試順序（假設 RTX 5070 Ti 16GB VRAM）
 
-目前已在後端加入：
+1. **Wan 2.2 TI2V-5B** — 文生/圖生影片皆可，建議先測短片與較低解析度。
+2. **FramePack-F1** — 可從圖片逐段生成；官方 Windows 桌面程式和 ComfyUI 整合是不同路線。
+3. **Wan 2.1 T2V-1.3B** — 小型文生影片選擇，適合驗證流程。
+4. **LTX-Video 0.9.8** — 支援多種條件控制，須配對正確模型與節點。
+5. **LTX-2** — 支援影音相關工作流；先驗證 ComfyUI 版本及 16GB 顯存可行性。
+6. **HunyuanVideo-1.5** — 有官方 ComfyUI 指引；建議從較低負載設定測試。
+7. **CogVideoX1.5-5B-I2V** — 圖生影片專用選擇，須確認相容節點及權重授權。
+8. **AnimateDiff** — 適合短動畫與風格實驗，需安裝對應 motion module/節點。
+9. **Stable Video Diffusion XT** — 較早期的圖生短片模型，可作基準比較。
+10. **Mochi 1** — 約 10B 模型，官方範例會使用 CPU 卸載，不建議作為 16GB 顯卡的第一個目標。
 
-- `GET /api/models/catalog`
-  - 回傳目前專案狀態
-  - 回傳推薦模型清單
-  - 回傳第 1 批模型整合順序
-- `POST /api/models/setup-batch`
-  - 會建立第 1 批模型的整合 manifest
-  - 輸出到影片資料夾下的 `model-setup/`
+VRAM 提示是初步規劃，不是硬體相容保證。量化方式、解析度、影格數、ComfyUI 節點與 CPU 卸載都會影響實際顯存和速度。模型權重授權可能與程式碼授權不同，商用前請查閱該版本的模型授權。
 
-第 1 批整合 manifest 會先為以下模型建立本機整合骨架：
+目前專案內真正整合的 AI 模型仍是 **0**。本機 ComfyUI 連線與 API 工作提交已完成；真正出片必須另外安裝模型/節點，選取相符工作流，並設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`。目前只有輸出 WebM 的工作流可自動匯入影片庫。
+
+### 輔助模型與後處理元件
+
+專案也保留 SDXL（首幀/圖片生成）、Real-ESRGAN（放大修復）、RIFE（補幀）、ControlNet/IP-Adapter（條件控制）等工作流元件；它們不計入上述 10 個影片模型選項。
+
+`GET /api/models/catalog` 回傳模型目錄；`POST /api/models/setup-batch` 只為下列輔助元件產生規劃 manifest，不會安裝或下載權重：
 
 - `sdxl`
 - `animatediff`
 - `realesrgan`
 - `rife`
-
-這些 manifest 的用途是：
-
-- 固定安裝目錄
-- 固定推薦用途
-- 固定整合順序
-- 當作後續接本機 Python / ComfyUI / ONNX / NCNN 流程的入口
 
 ## 驗證與測試
 
@@ -214,24 +188,15 @@ npm run test:visual
 
 ### 2. 為什麼現在還不是真的 AI 模型出片？
 
-目前做的是 **本機 CUDA 推論骨架**，先把：
+目前已提供 **本機 ComfyUI 工作流 API 整合**。要實際生成模型影片，還需要：
 
-- Windows 11 路徑
-- 本機 GPU 偵測
-- 本機推論工作管理
-- 前後端整合介面
-
-準備好。下一步才是把你的實際模型流程接進來。
+- 啟動本機 ComfyUI 並安裝模型/所需自訂節點
+- 匯出 API 格式工作流並設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`
+- 在工作流使用支援的佔位符與 WebM 輸出節點
 
 ### 3. 如果我要換模型怎麼做？
 
-保持現在的後端與前端不變，改你的：
-
-- 本機推論命令
-- 模型目錄
-- 命令列參數
-
-即可。
+匯出另一份 ComfyUI API 格式工作流，更新 `VEDIO_FACTORY_COMFYUI_WORKFLOW` 後重新啟動 vedioFactory。模型、節點與 VRAM 需求由該工作流及本機 ComfyUI 安裝決定。
 
 ## 模組擴充
 
