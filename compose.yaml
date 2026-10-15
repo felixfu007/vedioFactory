@@ -1,0 +1,22 @@
+services:
+  vediofactory:
+    build: .
+    ports:
+      - "127.0.0.1:${VEDIO_FACTORY_PORT:-8000}:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      VEDIO_FACTORY_OUTPUT_DIR: /data/output
+      VEDIO_FACTORY_MODEL_DIR: /data/models
+      VEDIO_FACTORY_COMFYUI_URL: http://host.docker.internal:8188
+      VEDIO_FACTORY_COMFYUI_WORKFLOW: ${VEDIO_FACTORY_COMFYUI_WORKFLOW:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - vediofactory-output:/data/output
+      - vediofactory-models:/data/models
+      - ./workflows:/workflows:ro
+
+volumes:
+  vediofactory-output:
+  vediofactory-models:

@@ -490,13 +490,13 @@ function getComfyUIConfig(options = {}) {
     const parsed = new URL(configuredUrl);
     if (
       parsed.protocol !== 'http:'
-      || !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+      || !['localhost', '127.0.0.1', '[::1]', 'host.docker.internal'].includes(parsed.hostname)
       || parsed.username
       || parsed.password
       || parsed.search
       || parsed.hash
     ) {
-      throw new Error('ComfyUI must use an unauthenticated HTTP URL on localhost.');
+      throw new Error('ComfyUI must use unauthenticated HTTP on localhost or host.docker.internal.');
     }
     baseUrl = parsed.origin;
   } catch (configError) {
@@ -623,7 +623,7 @@ async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig()) {
     },
     gpu,
     guidance: [
-      '請在本機啟動 ComfyUI，並將服務限制在 localhost。',
+      '請在本機啟動 ComfyUI；Docker 部署時使用 host.docker.internal，並透過防火牆限制存取。',
       '設定 VEDIO_FACTORY_COMFYUI_WORKFLOW 指向 ComfyUI 匯出的 API 格式工作流 JSON。',
       `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 .webm 影片會複製到 ${outputDir}。`,
     ],

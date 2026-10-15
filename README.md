@@ -54,6 +54,25 @@ npm start
 
 > 在 Windows 11 上，預設輸出資料夾會是 `C:\Users\<你的帳號>\Videos\vedioFactory`。你也可以在網站上輸入任意絕對路徑，切換成本機後端管理的資料夾。若想改用瀏覽器授權資料夾，也可以在介面中手動切換。
 
+## Docker 部署（ComfyUI 留在 Windows 主機）
+
+專案也提供 Docker Compose 設定，只將 vedioFactory 容器化；ComfyUI 和 GPU 推論仍在 Windows 主機執行。先安裝並啟動 Docker Desktop，然後在專案目錄的 PowerShell 執行：
+
+```powershell
+docker compose up --build -d
+```
+
+開啟 `http://127.0.0.1:8000`。Compose 將影片輸出和模型參考目錄保存在 Docker volumes，`docker compose down` 不會刪除資料；`docker compose down -v` 會刪除這些資料。ComfyUI 模型仍須安裝在主機上的 ComfyUI 模型目錄；`/data/models` 不會自動同步到 ComfyUI。
+
+Docker 容器中的 `localhost` 指向容器本身，因此 Compose 使用 `host.docker.internal` 連回 Windows 主機。若要執行推論，ComfyUI 必須允許 Docker 容器連線（例如以 `--listen 0.0.0.0` 啟動），並在 Windows 防火牆限制存取範圍；不要將 ComfyUI 的 8188 埠公開到不可信的網路。若有 API 格式工作流，將它放在專案的 `workflows` 資料夾，並在啟動 Compose 前設定容器內路徑：
+
+```powershell
+$env:VEDIO_FACTORY_COMFYUI_WORKFLOW="/workflows/video-api.json"
+docker compose up --build -d
+```
+
+網站埠只綁定主機的 `127.0.0.1`。若要更改主機埠，例如 8080，先設定 `$env:VEDIO_FACTORY_PORT="8080"` 再執行 Compose。Docker 部署不會替 ComfyUI 安裝模型、節點或 GPU 執行環境。
+
 ## Windows 11 使用方式
 
 1. 上傳照片（可選）
