@@ -20,6 +20,7 @@ const DEFAULT_MODEL_DIR = path.resolve(
 );
 const MAX_JSON_BODY = 80 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_VIDEO_METADATA_BYTES = 32 * 1024 * 1024;
 const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
 const MODEL_SETUP_DIR_NAME = 'model-setup';
 const MAX_COMFY_WORKFLOW_BYTES = 10 * 1024 * 1024;
@@ -397,28 +398,64 @@ async function readJsonBody(request) {
   }
 }
 
-function parseVideoMetadataHeader(value) {
-  if (typeof value !== 'string' || !value) {
-    throw createRequestError('缺少影片 metadata。');
-  }
-
-  try {
-    const metadata = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      throw new Error('Invalid metadata');
-    }
-    return metadata;
-  } catch {
+function validateVideoMetadata(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
     throw createRequestError('影片 metadata 格式錯誤。');
   }
+  if (typeof item.id !== 'string' || !item.id.trim() || item.id.length > 200) {
+    throw createRequestError('影片 metadata 缺少有效的影片 ID。');
+  }
+  if (typeof item.fileName !== 'string' || !item.fileName.trim()) {
+    throw createRequestError('影片 metadata 缺少有效的檔名。');
+  }
+  for (const field of ['prompt', 'story', 'moduleId', 'moduleName', 'resolution', 'quality']) {
+    if (item[field] !== undefined && (typeof item[field] !== 'string' || item[field].length > 5_000)) {
+      throw createRequestError(`影片 metadata 欄位無效：${field}。`);
+    }
+  }
+  for (const field of ['duration', 'fps', 'width', 'height', 'motion', 'captionStrength']) {
+    if (item[field] !== undefined && (!Number.isFinite(item[field]) || item[field] < 0 || item[field] > 100_000)) {
+      throw createRequestError(`影片 metadata 欄位無效：${field}。`);
+    }
+  }
+  if (item.sourceImageDataUrl !== undefined && (
+    typeof item.sourceImageDataUrl !== 'string'
+    || item.sourceImageDataUrl.length > 28 * 1024 * 1024
+  )) {
+    throw createRequestError('影片來源圖片資料格式錯誤或超過 20 MB。', 413);
+  }
+  return item;
 }
 
 async function receiveVideoUpload(request, temporaryPath, maxBytes) {
-  const contentLength = Number(request.headers['content-length']);
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    request.resume();
-    throw createRequestError('影片檔案過大。', 413);
+  const iterator = request[Symbol.asyncIterator]();
+  let prefix = Buffer.alloc(0);
+  while (prefix.length < 4) {
+    const { value, done } = await iterator.next();
+    if (done) throw createRequestError('影片上傳缺少 metadata。');
+    prefix = Buffer.concat([prefix, value]);
   }
+  const metadataLength = prefix.readUInt32BE(0);
+  if (!metadataLength || metadataLength > MAX_VIDEO_METADATA_BYTES) {
+    request.resume();
+    throw createRequestError('影片 metadata 過大或格式錯誤。', metadataLength > MAX_VIDEO_METADATA_BYTES ? 413 : 400);
+  }
+
+  let metadataBuffer = prefix.subarray(4);
+  while (metadataBuffer.length < metadataLength) {
+    const { value, done } = await iterator.next();
+    if (done) throw createRequestError('影片上傳的 metadata 不完整。');
+    metadataBuffer = Buffer.concat([metadataBuffer, value]);
+  }
+  let metadata;
+  try {
+    metadata = validateVideoMetadata(JSON.parse(metadataBuffer.subarray(0, metadataLength).toString('utf8')));
+  } catch (error) {
+    request.resume();
+    if (error instanceof SyntaxError) throw createRequestError('影片 metadata 格式錯誤。');
+    throw error;
+  }
+  const firstVideoChunk = metadataBuffer.subarray(metadataLength);
 
   let size = 0;
   const sizeLimiter = new Transform({
@@ -432,11 +469,16 @@ async function receiveVideoUpload(request, temporaryPath, maxBytes) {
     },
   });
 
-  await pipeline(request, sizeLimiter, createWriteStream(temporaryPath, { flags: 'wx' }));
+  async function* videoChunks() {
+    if (firstVideoChunk.length) yield firstVideoChunk;
+    for await (const chunk of iterator) yield chunk;
+  }
+
+  await pipeline(Readable.from(videoChunks()), sizeLimiter, createWriteStream(temporaryPath, { flags: 'wx' }));
   if (size === 0) {
     throw createRequestError('影片檔案不可為空。');
   }
-  return size;
+  return { fileSize: size, metadata };
 }
 
 function getComfyUIConfig(options = {}) {
@@ -1113,6 +1155,7 @@ function createApp(options = {}) {
   }
 
   async function saveVideoAsset(item, videoBase64) {
+    validateVideoMetadata(item);
     const fileName = sanitizeFileName(item.fileName);
     const videoPath = path.join(outputDir, fileName);
     const metadataPath = path.join(outputDir, `${fileName}.json`);
@@ -1133,19 +1176,17 @@ function createApp(options = {}) {
     };
   }
 
-  async function saveStreamedVideoAsset(request, metadataHeader) {
-    const item = parseVideoMetadataHeader(metadataHeader);
-    const fileName = sanitizeFileName(item.fileName);
-    const videoPath = path.join(outputDir, fileName);
-    const metadataPath = path.join(outputDir, `${fileName}.json`);
+  async function saveStreamedVideoAsset(request) {
+    await ensureOutputDir();
     const temporaryToken = crypto.randomUUID();
     const temporaryVideoPath = path.join(outputDir, `.${temporaryToken}.upload`);
     const temporaryMetadataPath = path.join(outputDir, `.${temporaryToken}.json`);
-    const persistedItem = { ...item, fileName };
-
-    await ensureOutputDir();
     try {
-      const fileSize = await receiveVideoUpload(request, temporaryVideoPath, maxVideoUploadBytes);
+      const { fileSize, metadata: item } = await receiveVideoUpload(request, temporaryVideoPath, maxVideoUploadBytes);
+      const fileName = sanitizeFileName(item.fileName);
+      const videoPath = path.join(outputDir, fileName);
+      const metadataPath = path.join(outputDir, `${fileName}.json`);
+      const persistedItem = { ...item, fileName };
       await fs.writeFile(temporaryMetadataPath, JSON.stringify(persistedItem, null, 2), { flag: 'wx' });
       await fs.rename(temporaryVideoPath, videoPath);
       await fs.rename(temporaryMetadataPath, metadataPath);
@@ -1324,10 +1365,7 @@ function createApp(options = {}) {
 
     if (requestUrl.pathname === '/api/videos' && request.method === 'POST') {
       if (request.headers['content-type'] === 'application/octet-stream') {
-        return sendJson(response, 201, await saveStreamedVideoAsset(
-          request,
-          request.headers['x-video-metadata'],
-        ));
+        return sendJson(response, 201, await saveStreamedVideoAsset(request));
       }
       const body = await readJsonBody(request);
       if (!body.item || typeof body.videoBase64 !== 'string') {

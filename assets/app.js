@@ -316,9 +316,11 @@
     return { width, height };
   }
 
-  function encodeMetadataHeader(metadata) {
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(metadata))));
-    return encoded.replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
+  function createVideoUploadBody(metadata, videoBlob) {
+    const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
+    const metadataLength = new Uint8Array(4);
+    new DataView(metadataLength.buffer).setUint32(0, metadataBytes.length);
+    return new Blob([metadataLength, metadataBytes, videoBlob], { type: 'application/octet-stream' });
   }
 
   async function fetchJson(url, options = {}) {
@@ -460,11 +462,8 @@
       item.previewUrl = `/api/videos/${encodeURIComponent(item.fileName)}?t=${Date.now()}`;
       await fetchJson('/api/videos', {
         method: 'POST',
-        headers: {
-          'content-type': 'application/octet-stream',
-          'x-video-metadata': encodeMetadataHeader(stripTransientFields(item)),
-        },
-        body: item.blob,
+        headers: { 'content-type': 'application/octet-stream' },
+        body: createVideoUploadBody(stripTransientFields(item), item.blob),
       });
       return item;
     }
