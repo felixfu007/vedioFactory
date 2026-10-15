@@ -106,7 +106,7 @@ API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 
 - 真正已整合的 AI 模型：**0**
 - 已完成的內容：
   - 前端視覺模組：`cinematic-motion`、`storyboard-focus`、`neon-pulse`
-  - 本機推論骨架：`local-nvidia-cuda`
+  - 本機 ComfyUI API 工作流提交與 WebM 匯入
   - 本機模型規劃與首批整合 manifest 建立 API
 
 ### 建議整合順序

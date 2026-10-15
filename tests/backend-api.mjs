@@ -211,6 +211,7 @@ async function main() {
     assert.equal(empty.length, 0);
 
     let comfyWorkflow;
+    let comfyRunning = false;
     let comfyFinished = false;
     const comfyServer = http.createServer(async (request, response) => {
       const chunks = [];
@@ -226,8 +227,8 @@ async function main() {
         response.end(JSON.stringify({ prompt_id: 'comfy-prompt-123', number: 1 }));
       } else if (request.url === '/queue') {
         response.end(JSON.stringify({
-          queue_running: [],
-          queue_pending: comfyFinished ? [] : [[0, 'comfy-prompt-123']],
+          queue_running: comfyRunning ? [[0, 'comfy-prompt-123']] : [],
+          queue_pending: comfyRunning || comfyFinished ? [] : [[0, 'comfy-prompt-123']],
         }));
       } else if (request.url === '/history/comfy-prompt-123') {
         response.end(JSON.stringify(comfyFinished ? {
@@ -235,6 +236,8 @@ async function main() {
             status: { completed: true, status_str: 'success' },
             outputs: { '4': { videos: [{ filename: 'generated.webm', type: 'output' }] } },
           },
+        } : comfyRunning ? {
+          'comfy-prompt-123': { status: { completed: false, status_str: 'running' }, outputs: {} },
         } : {}));
       } else if (request.url.startsWith('/view?')) {
         response.setHeader('content-type', 'video/webm');
@@ -282,9 +285,12 @@ async function main() {
       const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(queuedJob.status, 'queued');
 
+      comfyRunning = true;
+      const runningJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
+      assert.equal(runningJob.status, 'running');
       comfyFinished = true;
       const completedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
-      assert.equal(completedJob.status, 'succeeded');
+      assert.equal(completedJob.status, 'succeeded', JSON.stringify(completedJob));
       assert.equal(completedJob.outputs.length, 1);
       assert.equal(await fs.readFile(path.join(comfyOutputDir, completedJob.outputs[0].fileName), 'utf8'), 'fake-comfy-webm');
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());

@@ -338,7 +338,7 @@ async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig()) {
     platform: process.platform,
     outputDir,
     modelDir: DEFAULT_MODEL_DIR,
-    engineCommandConfigured: Boolean(comfyUI.workflowPath),
+    workflowConfigured: Boolean(comfyUI.workflowPath),
     comfyUI: {
       ...comfy,
       workflowConfigured: Boolean(comfyUI.workflowPath),
@@ -540,13 +540,14 @@ function createApp(options = {}) {
       const fileName = sanitizeFileName(`comfyui-${job.comfyPromptId.slice(0, 8)}-${index + 1}.webm`);
       const videoPath = path.join(outputDir, fileName);
       const temporaryPath = `${videoPath}.${crypto.randomUUID()}.tmp`;
+      let stats;
       try {
         const contentLength = Number(response.headers.get('content-length') || 0);
         if (contentLength > 2 * 1024 * 1024 * 1024) {
           throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
         }
         await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath, { flags: 'wx' }));
-        const stats = await fs.stat(temporaryPath);
+        stats = await fs.stat(temporaryPath);
         if (stats.size > 2 * 1024 * 1024 * 1024) {
           throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
         }
@@ -740,7 +741,7 @@ function createApp(options = {}) {
       settings: payload.settings || {},
       sourceImageAttached: Boolean(payload.sourceImageDataUrl),
       modelDir: runtime.modelDir,
-      engineCommandConfigured: runtime.engineCommandConfigured,
+      workflowConfigured: runtime.workflowConfigured,
       comfyUIUrl: comfyUI.baseUrl,
       guidance: '請設定 ComfyUI API 工作流 JSON；工作流需使用 {{prompt}} 等佔位符，並輸出 WebM 影片。',
       manifestPath: path.join(
@@ -999,7 +1000,7 @@ function createApp(options = {}) {
 async function startServer(options = {}) {
   const app = createApp(options);
   await fs.mkdir(app.getOutputDir(), { recursive: true });
-  await new Promise((resolve) => app.server.listen(options.port || PORT, options.host || HOST, resolve));
+  await new Promise((resolve) => app.server.listen(options.port ?? PORT, options.host ?? HOST, resolve));
   return app;
 }
 
