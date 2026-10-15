@@ -451,9 +451,18 @@
     return persisted;
   }
 
+  function releasePreviewUrls(items) {
+    items.forEach((item) => {
+      if (typeof item.previewUrl === 'string' && item.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+  }
+
   async function listFolderItems() {
     if (state.backend.available) {
       const items = await fetchJson('/api/videos');
+      releasePreviewUrls(state.library);
       state.library = items;
       serializeLibrary();
       return items;
@@ -475,6 +484,7 @@
     }
 
     nextLibrary.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    releasePreviewUrls(state.library);
     state.library = nextLibrary;
     serializeLibrary();
     return nextLibrary;
@@ -561,28 +571,39 @@
       if (event.data.size > 0) chunks.push(event.data);
     });
 
-    const done = new Promise((resolve) => {
+    const done = new Promise((resolve, reject) => {
       recorder.addEventListener('stop', () => resolve(new Blob(chunks, { type: mimeType || 'video/webm' })), { once: true });
+      recorder.addEventListener('error', (event) => reject(event.error || new Error('影片錄製失敗')), { once: true });
     });
 
-    recorder.start();
-    const totalFrames = Math.max(1, Math.round(spec.duration * spec.fps));
-    const frameDuration = 1000 / spec.fps;
-    for (let frame = 0; frame < totalFrames; frame += 1) {
-      const progress = frame / Math.max(totalFrames - 1, 1);
-      moduleDefinition.renderFrame({
-        ctx,
-        canvas,
-        progress,
-        image,
-        spec,
-        fitImage,
-        drawCaptionBlock,
-      });
-      await wait(frameDuration);
+    try {
+      recorder.start();
+      const totalFrames = Math.max(1, Math.round(spec.duration * spec.fps));
+      const frameDuration = 1000 / spec.fps;
+      for (let frame = 0; frame < totalFrames; frame += 1) {
+        const progress = frame / Math.max(totalFrames - 1, 1);
+        moduleDefinition.renderFrame({
+          ctx,
+          canvas,
+          progress,
+          image,
+          spec,
+          fitImage,
+          drawCaptionBlock,
+        });
+        await wait(frameDuration);
+      }
+      recorder.stop();
+      return await done;
+    } catch (error) {
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+        await done.catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
     }
-    recorder.stop();
-    return done;
   }
 
   async function createAndStoreVideo(spec, suffix = '') {
@@ -673,6 +694,7 @@
       state.backend.available = true;
       state.backend.outputDir = payload.outputDir;
       state.folderHandle = null;
+      releasePreviewUrls(state.library);
       state.library = payload.items;
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
       state.modelCatalog = await fetchJson('/api/models/catalog', { headers: {} });
@@ -896,6 +918,7 @@
         await state.folderHandle.removeEntry(`${item.fileName}.json`);
         await listFolderItems();
       } else {
+        releasePreviewUrls([item]);
         state.library = state.library.filter((entry) => entry.id !== item.id);
       }
 
