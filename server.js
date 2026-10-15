@@ -2,8 +2,11 @@ const http = require('node:http');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
+const { createWriteStream } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { URL } = require('node:url');
 
 const HOST = process.env.HOST || '127.0.0.1';
@@ -18,6 +21,7 @@ const DEFAULT_MODEL_DIR = path.resolve(
 const MAX_JSON_BODY = 80 * 1024 * 1024;
 const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
 const MODEL_SETUP_DIR_NAME = 'model-setup';
+const MAX_COMFY_WORKFLOW_BYTES = 10 * 1024 * 1024;
 
 const MODEL_CATALOG = [
   {
@@ -250,25 +254,32 @@ function execFileAsync(command, args, options = {}) {
   });
 }
 
-function getLocalEngineConfig() {
-  let args = [];
-  if (process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS) {
-    try {
-      const parsed = JSON.parse(process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS);
-      if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
-        throw new Error('invalid args');
-      }
-      args = parsed;
-    } catch {
-      args = [process.env.VEDIO_FACTORY_LOCAL_ENGINE_ARGS];
+function getComfyUIConfig(options = {}) {
+  const configuredUrl = options.comfyUIUrl || process.env.VEDIO_FACTORY_COMFYUI_URL || 'http://127.0.0.1:8188';
+  const workflowPath = options.comfyUIWorkflowPath || process.env.VEDIO_FACTORY_COMFYUI_WORKFLOW || '';
+  let baseUrl = '';
+  let error = '';
+  try {
+    const parsed = new URL(configuredUrl);
+    if (
+      parsed.protocol !== 'http:'
+      || !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+    ) {
+      throw new Error('ComfyUI must use an unauthenticated HTTP URL on localhost.');
     }
+    baseUrl = parsed.origin;
+  } catch (configError) {
+    error = configError.message;
   }
-
   return {
-    provider: 'local-nvidia-cuda',
-    command: process.env.VEDIO_FACTORY_LOCAL_ENGINE_COMMAND || '',
-    args,
-    modelDir: DEFAULT_MODEL_DIR,
+    baseUrl,
+    configuredUrl,
+    workflowPath: workflowPath ? path.resolve(workflowPath) : '',
+    error,
   };
 }
 
@@ -303,23 +314,41 @@ async function detectNvidiaRuntime() {
   }
 }
 
-async function getInferenceRuntime(outputDir) {
-  const engine = getLocalEngineConfig();
-  const gpu = await detectNvidiaRuntime();
+async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig()) {
+  const [gpu, comfy] = await Promise.all([
+    detectNvidiaRuntime(),
+    (async () => {
+      if (!comfyUI.baseUrl) {
+        return { available: false, url: comfyUI.configuredUrl, error: comfyUI.error };
+      }
+      try {
+        const response = await fetch(`${comfyUI.baseUrl}/system_stats`, {
+          signal: AbortSignal.timeout(2_500),
+        });
+        if (!response.ok) throw new Error(`ComfyUI responded with HTTP ${response.status}`);
+        return { available: true, url: comfyUI.baseUrl };
+      } catch (error) {
+        return { available: false, url: comfyUI.baseUrl, error: error.message };
+      }
+    })(),
+  ]);
   return {
-    provider: engine.provider,
+    provider: 'comfyui-local',
     localGpuPreferred: true,
     platform: process.platform,
     outputDir,
-    modelDir: engine.modelDir,
-    engineCommandConfigured: Boolean(engine.command),
-    engineCommand: engine.command,
-    engineArgs: engine.args,
+    modelDir: DEFAULT_MODEL_DIR,
+    engineCommandConfigured: Boolean(comfyUI.workflowPath),
+    comfyUI: {
+      ...comfy,
+      workflowConfigured: Boolean(comfyUI.workflowPath),
+      workflowPath: comfyUI.workflowPath,
+    },
     gpu,
     guidance: [
-      '建議在 Windows 11 安裝最新 NVIDIA 驅動、CUDA Toolkit 與 Python 3.11。',
-      '將未來的本機推論入口指令寫入 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND。',
-      `模型權重預設放在 ${engine.modelDir}。`,
+      '請在本機啟動 ComfyUI，並將服務限制在 localhost。',
+      '設定 VEDIO_FACTORY_COMFYUI_WORKFLOW 指向 ComfyUI 匯出的 API 格式工作流 JSON。',
+      `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 .webm 影片會複製到 ${outputDir}。`,
     ],
   };
 }
@@ -333,7 +362,7 @@ function getCurrentProjectModelStatus() {
       { id: 'neon-pulse', type: 'canvas-module' },
     ],
     inferenceScaffold: {
-      provider: 'local-nvidia-cuda',
+      provider: 'comfyui-local',
       hasRuntimeDetection: true,
       hasJobManifestPersistence: true,
       hasRealModelExecution: false,
@@ -388,6 +417,7 @@ async function collectVideoItems(outputDir) {
 function createApp(options = {}) {
   let outputDir = normalizeOutputDir(options.outputDir || DEFAULT_OUTPUT_DIR);
   const renameLocks = new Map();
+  const comfyUI = getComfyUIConfig(options);
 
   async function ensureOutputDir() {
     await fs.mkdir(outputDir, { recursive: true });
@@ -399,6 +429,194 @@ function createApp(options = {}) {
 
   async function ensureModelSetupDir() {
     await fs.mkdir(path.join(outputDir, MODEL_SETUP_DIR_NAME), { recursive: true });
+  }
+
+  async function requestComfyUI(endpoint, requestOptions = {}) {
+    if (!comfyUI.baseUrl) {
+      throw createRequestError(comfyUI.error || 'ComfyUI URL 設定無效。', 503);
+    }
+    let response;
+    try {
+      response = await fetch(`${comfyUI.baseUrl}${endpoint}`, {
+        ...requestOptions,
+        signal: requestOptions.signal || AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      throw createRequestError(`無法連線至本機 ComfyUI：${error.message}`, 503);
+    }
+    if (!response.ok) {
+      const details = await response.text().catch(() => '');
+      throw createRequestError(`ComfyUI 請求失敗（${response.status}）：${details.slice(0, 1000)}`, 502);
+    }
+    return response;
+  }
+
+  async function loadComfyWorkflow() {
+    if (!comfyUI.workflowPath) {
+      throw createRequestError('尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。', 503);
+    }
+    const stats = await fs.stat(comfyUI.workflowPath).catch(() => null);
+    if (!stats?.isFile() || stats.size > MAX_COMFY_WORKFLOW_BYTES) {
+      throw createRequestError('ComfyUI 工作流不存在或超過 10 MB。', 400);
+    }
+    try {
+      const workflow = JSON.parse(await fs.readFile(comfyUI.workflowPath, 'utf8'));
+      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+        throw new Error('workflow must be an object');
+      }
+      return workflow;
+    } catch {
+      throw createRequestError('ComfyUI 工作流必須是有效的 API 格式 JSON。', 400);
+    }
+  }
+
+  async function uploadComfySourceImage(dataUrl) {
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z\d+/=]+)$/iu.exec(dataUrl);
+    if (!match) throw createRequestError('來源圖片僅支援 PNG、JPEG 或 WebP。', 400);
+    const image = Buffer.from(match[2], 'base64');
+    if (!image.length || image.length > 20 * 1024 * 1024) {
+      throw createRequestError('來源圖片不得為空或超過 20 MB。', 400);
+    }
+    const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[match[1].toLowerCase()];
+    const form = new FormData();
+    form.append('image', new Blob([image], { type: match[1] }), `vediofactory-${crypto.randomUUID()}.${extension}`);
+    form.append('overwrite', 'true');
+    const response = await requestComfyUI('/upload/image', { method: 'POST', body: form });
+    const result = await response.json();
+    if (!result.name) throw createRequestError('ComfyUI 未回傳上傳圖片名稱。', 502);
+    return [result.subfolder, result.name].filter(Boolean).join('/');
+  }
+
+  function applyWorkflowVariables(value, variables) {
+    if (typeof value === 'string') {
+      const exactMatch = /^\{\{([a-z_]+)\}\}$/iu.exec(value);
+      if (exactMatch && Object.hasOwn(variables, exactMatch[1])) return variables[exactMatch[1]];
+      return value.replace(/\{\{([a-z_]+)\}\}/giu, (token, key) => (
+        Object.hasOwn(variables, key) ? String(variables[key]) : token
+      ));
+    }
+    if (Array.isArray(value)) return value.map((item) => applyWorkflowVariables(item, variables));
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+        key,
+        applyWorkflowVariables(item, variables),
+      ]));
+    }
+    return value;
+  }
+
+  async function persistInferenceJob(job) {
+    const temporaryPath = `${job.manifestPath}.${crypto.randomUUID()}.tmp`;
+    await fs.writeFile(temporaryPath, JSON.stringify(job, null, 2));
+    await fs.rename(temporaryPath, job.manifestPath);
+  }
+
+  async function saveComfyVideoOutputs(job, historyEntry) {
+    const videos = [];
+    const visit = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+      } else if (value && typeof value === 'object') {
+        if (typeof value.filename === 'string' && /\.webm$/iu.test(value.filename)) videos.push(value);
+        Object.values(value).forEach(visit);
+      }
+    };
+    visit(historyEntry.outputs || {});
+    const uniqueVideos = [...new Map(videos.map((video) => [
+      `${video.type || 'output'}:${video.subfolder || ''}:${video.filename}`,
+      video,
+    ])).values()];
+    const savedFiles = [];
+
+    for (const [index, video] of uniqueVideos.entries()) {
+      const query = new URLSearchParams({
+        filename: video.filename,
+        subfolder: video.subfolder || '',
+        type: video.type || 'output',
+      });
+      const response = await requestComfyUI(`/view?${query}`, {
+        signal: AbortSignal.timeout(120_000),
+      });
+      const fileName = sanitizeFileName(`comfyui-${job.comfyPromptId.slice(0, 8)}-${index + 1}.webm`);
+      const videoPath = path.join(outputDir, fileName);
+      const temporaryPath = `${videoPath}.${crypto.randomUUID()}.tmp`;
+      try {
+        const contentLength = Number(response.headers.get('content-length') || 0);
+        if (contentLength > 2 * 1024 * 1024 * 1024) {
+          throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
+        }
+        await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath, { flags: 'wx' }));
+        const stats = await fs.stat(temporaryPath);
+        if (stats.size > 2 * 1024 * 1024 * 1024) {
+          throw createRequestError('ComfyUI 輸出影片超過 2 GB 上限。', 413);
+        }
+        await fs.rename(temporaryPath, videoPath);
+      } catch (error) {
+        await fs.rm(temporaryPath, { force: true });
+        throw error;
+      }
+      const resolution = job.settings.resolution || '1280x720';
+      const [width, height] = resolution.split('x').map(Number);
+      const metadata = {
+        id: crypto.randomUUID(),
+        fileName,
+        moduleId: job.moduleId,
+        moduleName: 'ComfyUI',
+        prompt: job.prompt,
+        story: job.story,
+        duration: Number(job.settings.duration) || 0,
+        fps: Number(job.settings.fps) || 24,
+        resolution,
+        width,
+        height,
+        quality: job.settings.quality || 'balanced',
+        motion: Number(job.settings.motion) || 0,
+        captionStrength: Number(job.settings.captionStrength) || 0,
+        createdAt: new Date().toISOString(),
+        inferenceJobId: job.id,
+      };
+      await fs.writeFile(path.join(outputDir, `${fileName}.json`), JSON.stringify(metadata, null, 2));
+      savedFiles.push({ fileName, fileSize: stats.size, previewUrl: `/api/videos/${encodeURIComponent(fileName)}` });
+    }
+    return savedFiles;
+  }
+
+  async function refreshComfyInferenceJob(job) {
+    if (!job.comfyPromptId || ['succeeded', 'failed', 'cancelled'].includes(job.status)) return job;
+    const [historyResponse, queueResponse] = await Promise.all([
+      requestComfyUI(`/history/${encodeURIComponent(job.comfyPromptId)}`),
+      requestComfyUI('/queue'),
+    ]);
+    const history = await historyResponse.json();
+    const queue = await queueResponse.json();
+    const historyEntry = history[job.comfyPromptId];
+    if (historyEntry) {
+      const status = historyEntry.status || {};
+      if (status.completed) {
+        const statusText = String(status.status_str || '').toLowerCase();
+        if (statusText !== 'success') {
+          job.status = 'failed';
+          job.error = `ComfyUI 工作失敗：${statusText || '未知錯誤'}`;
+        } else {
+          job.outputs = await saveComfyVideoOutputs(job, historyEntry);
+          job.status = 'succeeded';
+          if (!job.outputs.length) {
+            job.guidance = 'ComfyUI 工作已完成，但未找到 .webm 輸出；請確認工作流使用影片輸出節點並輸出 WebM。';
+          }
+        }
+      } else {
+        job.status = 'running';
+      }
+    } else {
+      const entries = [...(queue.queue_running || []), ...(queue.queue_pending || [])];
+      const queued = entries.some((entry) => Array.isArray(entry) && entry[1] === job.comfyPromptId);
+      job.status = queued && (queue.queue_running || []).some(
+        (entry) => Array.isArray(entry) && entry[1] === job.comfyPromptId,
+      ) ? 'running' : 'queued';
+    }
+    job.updatedAt = new Date().toISOString();
+    await persistInferenceJob(job);
+    return job;
   }
 
   async function withRenameLocks(lockKeys, operation) {
@@ -445,13 +663,14 @@ function createApp(options = {}) {
 
   async function getInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
-    return jobs.find((item) => item.id === jobId) || null;
+    const job = jobs.find((item) => item.id === jobId) || null;
+    return job?.comfyPromptId ? refreshComfyInferenceJob(job) : job;
   }
 
   async function createModelSetupBatch() {
     await ensureOutputDir();
     await ensureModelSetupDir();
-    const runtime = await getInferenceRuntime(outputDir);
+    const runtime = await getInferenceRuntime(outputDir, comfyUI);
     const catalog = buildModelCatalog(runtime.modelDir);
     const requestToken = crypto.randomUUID();
     const manifests = [];
@@ -507,26 +726,23 @@ function createApp(options = {}) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
 
-    const runtime = await getInferenceRuntime(outputDir);
+    const runtime = await getInferenceRuntime(outputDir, comfyUI);
     const jobId = crypto.randomUUID();
     const job = {
       id: jobId,
-      status: runtime.engineCommandConfigured ? 'queued' : 'scaffolded',
-      provider: runtime.provider,
+      status: 'scaffolded',
+      provider: 'comfyui-local',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       prompt: payload.prompt || '',
       story: payload.story || '',
       moduleId: payload.moduleId || '',
       settings: payload.settings || {},
-      sourceImageDataUrl: payload.sourceImageDataUrl || '',
+      sourceImageAttached: Boolean(payload.sourceImageDataUrl),
       modelDir: runtime.modelDir,
       engineCommandConfigured: runtime.engineCommandConfigured,
-      engineCommand: runtime.engineCommand,
-      engineArgs: runtime.engineArgs,
-      guidance: runtime.engineCommandConfigured
-        ? '已偵測到本機推論命令，可在後續版本接上真正模型執行流程。'
-        : '尚未設定本機推論命令。請先設定 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND 與模型目錄。',
+      comfyUIUrl: comfyUI.baseUrl,
+      guidance: '請設定 ComfyUI API 工作流 JSON；工作流需使用 {{prompt}} 等佔位符，並輸出 WebM 影片。',
       manifestPath: path.join(
         outputDir,
         INFERENCE_JOBS_DIR_NAME,
@@ -534,7 +750,47 @@ function createApp(options = {}) {
       ),
     };
 
-    await fs.writeFile(job.manifestPath, JSON.stringify(job, null, 2));
+    if (comfyUI.workflowPath) {
+      if (!runtime.comfyUI.available) {
+        throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
+      }
+      const workflow = await loadComfyWorkflow();
+      const sourceImage = payload.sourceImageDataUrl
+        ? await uploadComfySourceImage(payload.sourceImageDataUrl)
+        : '';
+      const resolution = String(job.settings.resolution || '1280x720').split('x').map(Number);
+      const variables = {
+        prompt: job.prompt || job.story,
+        story: job.story,
+        negative_prompt: '',
+        width: resolution[0],
+        height: resolution[1],
+        duration: Number(job.settings.duration) || 6,
+        fps: Number(job.settings.fps) || 24,
+        quality: job.settings.quality || 'balanced',
+        motion: Number(job.settings.motion) || 0,
+        caption_strength: Number(job.settings.captionStrength) || 0,
+        source_image: sourceImage,
+      };
+      const apiWorkflow = applyWorkflowVariables(workflow, variables);
+      if (/\{\{[a-z_]+\}\}/iu.test(JSON.stringify(apiWorkflow))) {
+        throw createRequestError('工作流含有未支援的佔位符。', 400);
+      }
+      const submission = await requestComfyUI('/prompt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: apiWorkflow, client_id: crypto.randomUUID() }),
+      }).then((response) => response.json());
+      if (!submission.prompt_id || (submission.node_errors && Object.keys(submission.node_errors).length)) {
+        throw createRequestError(`ComfyUI 拒絕工作流：${JSON.stringify(submission.node_errors || submission)}`, 400);
+      }
+      job.comfyPromptId = submission.prompt_id;
+      job.queuePosition = submission.number;
+      job.status = 'queued';
+      job.guidance = '已提交至本機 ComfyUI。請確認工作流輸出 .webm，完成後影片會匯入專案資料夾。';
+    }
+
+    await persistInferenceJob(job);
     return job;
   }
 
@@ -555,11 +811,11 @@ function createApp(options = {}) {
 
     if (requestUrl.pathname === '/api/inference/runtime' && request.method === 'GET') {
       await ensureOutputDir();
-      return sendJson(response, 200, await getInferenceRuntime(outputDir));
+      return sendJson(response, 200, await getInferenceRuntime(outputDir, comfyUI));
     }
 
     if (requestUrl.pathname === '/api/models/catalog' && request.method === 'GET') {
-      const runtime = await getInferenceRuntime(outputDir);
+      const runtime = await getInferenceRuntime(outputDir, comfyUI);
       return sendJson(response, 200, buildModelCatalog(runtime.modelDir));
     }
 

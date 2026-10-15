@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ async function main() {
     assert.equal(config.outputDir, managedOutputDir);
 
     const runtime = await fetch(`${origin}/api/inference/runtime`).then((response) => response.json());
-    assert.equal(runtime.provider, 'local-nvidia-cuda');
+    assert.equal(runtime.provider, 'comfyui-local');
     assert.equal(runtime.localGpuPreferred, true);
     assert.equal(runtime.outputDir, managedOutputDir);
     assert.ok(Array.isArray(runtime.guidance));
@@ -39,14 +40,14 @@ async function main() {
       body: JSON.stringify({}),
     }).then((response) => response.json());
     assert.equal(setupBatch.firstBatchModels.length, 4);
-    assert.equal(setupBatch.provider, 'local-nvidia-cuda');
+    assert.equal(setupBatch.provider, 'comfyui-local');
     assert.equal(setupBatch.installRoot, catalog.installRoot);
     assert.deepEqual(setupBatch.firstBatchModels.map((model) => model.modelId), ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     for (const manifest of setupBatch.firstBatchModels) {
       assert.match(manifest.manifestPath, /model-setup/);
       const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
       assert.match(setupManifestText, new RegExp(manifest.modelId));
-      assert.match(setupManifestText, /local-nvidia-cuda/);
+      assert.match(setupManifestText, /comfyui-local/);
       assert.match(setupManifestText, new RegExp(catalog.installRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
     const setupBatchAgain = await fetch(`${origin}/api/models/setup-batch`, {
@@ -174,7 +175,7 @@ async function main() {
         },
       }),
     }).then((response) => response.json());
-    assert.equal(inferenceJob.provider, 'local-nvidia-cuda');
+    assert.equal(inferenceJob.provider, 'comfyui-local');
     assert.match(inferenceJob.status, /queued|scaffolded/);
 
     const listedJobs = await fetch(`${origin}/api/inference/jobs`).then((response) => response.json());
@@ -195,7 +196,7 @@ async function main() {
     assert.match(missingJob.error, /找不到推論工作/);
 
     const manifestText = await fs.readFile(inferenceJob.manifestPath, 'utf8');
-    assert.match(manifestText, /local-nvidia-cuda/);
+    assert.match(manifestText, /comfyui-local/);
 
     const malformedJsonResponse = await fetch(`${origin}/api/inference/jobs`, {
       method: 'POST',
@@ -208,6 +209,92 @@ async function main() {
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
+
+    let comfyWorkflow;
+    let comfyFinished = false;
+    const comfyServer = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = Buffer.concat(chunks).toString('utf8');
+      response.setHeader('content-type', 'application/json');
+      if (request.url === '/system_stats') {
+        response.end(JSON.stringify({}));
+      } else if (request.url === '/upload/image' && request.method === 'POST') {
+        response.end(JSON.stringify({ name: 'test.png', subfolder: 'upload' }));
+      } else if (request.url === '/prompt' && request.method === 'POST') {
+        comfyWorkflow = JSON.parse(body).prompt;
+        response.end(JSON.stringify({ prompt_id: 'comfy-prompt-123', number: 1 }));
+      } else if (request.url === '/queue') {
+        response.end(JSON.stringify({
+          queue_running: [],
+          queue_pending: comfyFinished ? [] : [[0, 'comfy-prompt-123']],
+        }));
+      } else if (request.url === '/history/comfy-prompt-123') {
+        response.end(JSON.stringify(comfyFinished ? {
+          'comfy-prompt-123': {
+            status: { completed: true, status_str: 'success' },
+            outputs: { '4': { videos: [{ filename: 'generated.webm', type: 'output' }] } },
+          },
+        } : {}));
+      } else if (request.url.startsWith('/view?')) {
+        response.setHeader('content-type', 'video/webm');
+        response.end('fake-comfy-webm');
+      } else {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: 'not found' }));
+      }
+    });
+    await new Promise((resolve) => comfyServer.listen(0, '127.0.0.1', resolve));
+    const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
+    const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
+    const workflowPath = path.join(comfyOutputDir, 'workflow.json');
+    await fs.writeFile(workflowPath, JSON.stringify({
+      '1': { inputs: { text: '{{prompt}}', width: '{{width}}', image: '{{source_image}}' } },
+    }));
+    const comfyApp = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+      outputDir: comfyOutputDir,
+      comfyUIUrl: comfyOrigin,
+      comfyUIWorkflowPath: workflowPath,
+    });
+    const comfyAddress = comfyApp.server.address();
+    const comfyAppOrigin = `http://127.0.0.1:${comfyAddress.port}`;
+    try {
+      const comfyRuntime = await fetch(`${comfyAppOrigin}/api/inference/runtime`).then((response) => response.json());
+      assert.equal(comfyRuntime.comfyUI.available, true);
+      assert.equal(comfyRuntime.comfyUI.workflowConfigured, true);
+      const comfyJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '本機 ComfyUI 測試',
+          moduleId: 'cinematic-motion',
+          sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+          settings: { resolution: '640x360', duration: 2, fps: 24 },
+        }),
+      }).then((response) => response.json());
+      assert.equal(comfyJob.status, 'queued');
+      assert.equal(comfyJob.comfyPromptId, 'comfy-prompt-123');
+      assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
+      assert.equal(comfyWorkflow['1'].inputs.width, 640);
+      assert.equal(comfyWorkflow['1'].inputs.image, 'upload/test.png');
+      const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
+      assert.equal(queuedJob.status, 'queued');
+
+      comfyFinished = true;
+      const completedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
+      assert.equal(completedJob.status, 'succeeded');
+      assert.equal(completedJob.outputs.length, 1);
+      assert.equal(await fs.readFile(path.join(comfyOutputDir, completedJob.outputs[0].fileName), 'utf8'), 'fake-comfy-webm');
+      const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
+      assert.equal(importedVideos.length, 1);
+      assert.match(importedVideos[0].fileName, /\.webm$/u);
+    } finally {
+      await new Promise((resolve) => comfyApp.server.close(resolve));
+      await new Promise((resolve) => comfyServer.close(resolve));
+      await fs.rm(comfyOutputDir, { recursive: true, force: true });
+    }
 
     console.log(JSON.stringify({ ok: true, origin, managedOutputDir, repoRoot }, null, 2));
   } finally {

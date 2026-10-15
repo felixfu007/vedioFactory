@@ -69,8 +69,8 @@ npm start
 | --- | --- | --- |
 | `VEDIO_FACTORY_OUTPUT_DIR` | `%USERPROFILE%\Videos\vedioFactory` | 影片輸出資料夾 |
 | `VEDIO_FACTORY_MODEL_DIR` | `%USERPROFILE%\vedioFactory\models` | 本機模型權重目錄 |
-| `VEDIO_FACTORY_LOCAL_ENGINE_COMMAND` | 空值 | 未來本機推論入口命令 |
-| `VEDIO_FACTORY_LOCAL_ENGINE_ARGS` | 空值 | 推論命令參數 |
+| `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
+| `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | ComfyUI 匯出的 API 格式工作流 JSON 絕對路徑 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `PORT` | `8000` | 服務埠號 |
 
@@ -79,31 +79,25 @@ npm start
 ```powershell
 $env:VEDIO_FACTORY_OUTPUT_DIR="C:\AI\vedioFactory\output"
 $env:VEDIO_FACTORY_MODEL_DIR="C:\AI\vedioFactory\models"
-$env:VEDIO_FACTORY_LOCAL_ENGINE_COMMAND="python"
-$env:VEDIO_FACTORY_LOCAL_ENGINE_ARGS='[".\\local-ai\\run_inference.py","--device","cuda"]'
+$env:VEDIO_FACTORY_COMFYUI_URL="http://127.0.0.1:8188"
+$env:VEDIO_FACTORY_COMFYUI_WORKFLOW="C:\AI\vedioFactory\workflows\video-api.json"
 npm start
 ```
 
-## 本機 NVIDIA / CUDA 推論骨架
+## 本機 ComfyUI 工作流推論
 
-目前已加入一個「骨架版」本機推論流程，目的不是直接完成真實模型推論，而是先把未來要接本機顯卡的結構準備好。
+請先在本機啟動 ComfyUI，並在 ComfyUI 將工作流匯出為 **API 格式 JSON**。在 vedioFactory 啟動前設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`，再從介面建立本機推論工作。
 
-目前可用能力：
+API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 可放在載入圖片節點的圖片欄位：
 
-- 後端會提供 `/api/inference/runtime`
-- 會檢查 `nvidia-smi` 是否可用
-- 會回報目前平台、模型目錄、推論命令是否已設定
-- 前端介面會顯示「本機 NVIDIA / CUDA 推論骨架」狀態
-- 你可以直接從介面建立一筆「本機推論工作」
-- 後端會把推論工作 manifest 寫到輸出資料夾下的 `inference-jobs/`
+- `{{prompt}}`、`{{story}}`、`{{negative_prompt}}`
+- `{{width}}`、`{{height}}`、`{{duration}}`、`{{fps}}`
+- `{{quality}}`、`{{motion}}`、`{{caption_strength}}`
+- `{{source_image}}`
 
-這代表之後要接真正模型時，只需要把：
+來源圖片會上傳到本機 ComfyUI；ComfyUI 回傳的 `.webm` 輸出會匯入 vedioFactory 的影片資料夾。其他輸出格式目前不會自動匯入。工作狀態會透過 ComfyUI history/queue 查詢，工作 manifest 保存在輸出資料夾下的 `inference-jobs/`。
 
-- `VEDIO_FACTORY_LOCAL_ENGINE_COMMAND`
-- `VEDIO_FACTORY_LOCAL_ENGINE_ARGS`
-- 模型權重目錄
-
-接到你自己的本機推論程式即可，不需要改成第三方 API。
+安全限制：目前只允許 HTTP 連線至 `localhost`、`127.0.0.1` 或 `::1`，不會將工作流或圖片送往第三方服務。尚未設定工作流時，介面只會建立標示為 `scaffolded` 的工作，不代表已執行模型。
 
 ## 模型整合規劃表
 

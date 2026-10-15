@@ -17,6 +17,7 @@
     inference: {
       runtime: null,
       lastJob: null,
+      pollTimer: null,
     },
     modelCatalog: null,
   };
@@ -200,7 +201,8 @@
       `平台：${runtime.platform}`,
       `GPU：${runtime.gpu?.detected ? `${runtime.gpu.name || 'NVIDIA'} / ${runtime.gpu.memoryTotal || '未知 VRAM'}` : '尚未偵測到 nvidia-smi'}`,
       `模型目錄：${runtime.modelDir}`,
-      `推論命令：${runtime.engineCommandConfigured ? `${runtime.engineCommand} ${runtime.engineArgs.join(' ')}`.trim() : '尚未設定 VEDIO_FACTORY_LOCAL_ENGINE_COMMAND'}`,
+      `ComfyUI：${runtime.comfyUI?.available ? `已連線 (${runtime.comfyUI.url})` : `未連線 (${runtime.comfyUI?.error || runtime.comfyUI?.url || '未設定'})`}`,
+      `API 工作流：${runtime.comfyUI?.workflowConfigured ? runtime.comfyUI.workflowPath : '尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW'}`,
       `方向：${runtime.provider}`,
     ];
 
@@ -763,6 +765,32 @@
 
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
+      if (job.comfyPromptId) {
+        if (state.inference.pollTimer) window.clearInterval(state.inference.pollTimer);
+        const refreshJob = async () => {
+          try {
+            const updated = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}`, { headers: {} });
+            state.inference.lastJob = updated;
+            setInferenceStatus(`ComfyUI 工作：${updated.status}${updated.outputs?.length ? `；已匯入 ${updated.outputs.length} 部影片` : ''}`);
+            if (['succeeded', 'failed', 'cancelled'].includes(updated.status)) {
+              window.clearInterval(state.inference.pollTimer);
+              state.inference.pollTimer = null;
+              if (updated.status === 'succeeded') {
+                await listFolderItems();
+                renderLibrary();
+              }
+            }
+          } catch (error) {
+            setInferenceStatus(`查詢 ComfyUI 工作失敗：${error.message}`);
+            window.clearInterval(state.inference.pollTimer);
+            state.inference.pollTimer = null;
+          }
+        };
+        await refreshJob();
+        if (state.inference.lastJob && !['succeeded', 'failed', 'cancelled'].includes(state.inference.lastJob.status)) {
+          state.inference.pollTimer = window.setInterval(refreshJob, 2_500);
+        }
+      }
     } catch (error) {
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
