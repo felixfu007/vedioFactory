@@ -377,6 +377,8 @@ async function main() {
         }),
       }).then((response) => response.json());
       assert.equal(pendingJob.status, 'queued');
+      const persistedActiveJobs = await fetch(`${comfyAppOrigin}/api/inference/jobs`).then((response) => response.json());
+      assert.ok(persistedActiveJobs.some((job) => job.id === pendingJob.id && job.comfyPromptId));
       const cancelledResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${pendingJob.id}/cancel`, {
         method: 'POST',
       });

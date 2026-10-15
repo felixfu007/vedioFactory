@@ -100,6 +100,8 @@ API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 
 
 推論工作在 ComfyUI 尚未開始執行時可從待執行佇列取消。若工作已在執行，介面會拒絕取消：ComfyUI 的 `/interrupt` 會中斷目前全域執行，可能影響其他工作，因此本專案不會自動呼叫它。
 
+重新整理頁面或重啟 vedioFactory 後，前端會從 `inference-jobs/` 恢復追蹤最新的待執行/執行中工作。這依賴 ComfyUI 保留對應 prompt history/queue；若 ComfyUI 重啟或清除 queue/history，需手動重新建立工作。
+
 來源圖片會上傳到本機 ComfyUI；ComfyUI 回傳的 `.webm` 輸出會匯入 vedioFactory 的影片資料夾。其他輸出格式目前不會自動匯入。工作狀態會透過 ComfyUI history/queue 查詢，工作 manifest 保存在輸出資料夾下的 `inference-jobs/`。
 
 預檢只靜態檢查 JSON 和節點名稱/設定提示，不會執行工作流，不能確認模型權重或 custom nodes 已安裝、模型/節點彼此相容、VRAM 足夠或實際輸出格式正確。仍需在本機 ComfyUI 實際生成驗證。

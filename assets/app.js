@@ -18,6 +18,8 @@
       runtime: null,
       lastJob: null,
       pollTimer: null,
+      pollingJobId: '',
+      pollInFlight: false,
     },
     modelCatalog: null,
   };
@@ -766,6 +768,64 @@
       syncStorageUi();
       renderInferenceRuntime();
       renderModelCatalog();
+      await restoreActiveInferenceJob();
+    }
+  }
+
+  function stopInferenceJobPolling() {
+    if (state.inference.pollTimer) {
+      window.clearInterval(state.inference.pollTimer);
+      state.inference.pollTimer = null;
+    }
+    state.inference.pollingJobId = '';
+    state.inference.pollInFlight = false;
+  }
+
+  function startInferenceJobPolling(job) {
+    stopInferenceJobPolling();
+    if (!job?.comfyPromptId) return;
+    state.inference.pollingJobId = job.id;
+    const refreshJob = async () => {
+      if (state.inference.pollInFlight || state.inference.pollingJobId !== job.id) return;
+      state.inference.pollInFlight = true;
+      try {
+        const updated = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}`, { headers: {} });
+        if (state.inference.pollingJobId !== job.id) return;
+        state.inference.lastJob = updated;
+        setInferenceStatus(`ComfyUI 工作：${updated.status}${updated.outputs?.length ? `；已匯入 ${updated.outputs.length} 部影片` : ''}`);
+        ui.cancelInferenceButton.hidden = updated.status !== 'queued';
+        if (['succeeded', 'failed', 'cancelled'].includes(updated.status)) {
+          stopInferenceJobPolling();
+          if (updated.status === 'succeeded') {
+            await listFolderItems();
+            renderLibrary();
+          }
+        }
+      } catch (error) {
+        setInferenceStatus(`查詢 ComfyUI 工作失敗：${error.message}`);
+        stopInferenceJobPolling();
+      } finally {
+        state.inference.pollInFlight = false;
+      }
+    };
+    refreshJob();
+    state.inference.pollTimer = window.setInterval(refreshJob, 2_500);
+  }
+
+  async function restoreActiveInferenceJob() {
+    if (!state.backend.available) return;
+    try {
+      const jobs = await fetchJson('/api/inference/jobs', { headers: {} });
+      const activeJob = jobs.find((job) => (
+        job.comfyPromptId && ['queued', 'running'].includes(job.status)
+      ));
+      if (!activeJob) return;
+      state.inference.lastJob = activeJob;
+      setInferenceStatus(`恢復追蹤 ComfyUI 工作：${activeJob.id}（${activeJob.status}）`);
+      ui.cancelInferenceButton.hidden = activeJob.status !== 'queued';
+      startInferenceJobPolling(activeJob);
+    } catch (error) {
+      console.warn('Unable to restore active inference job.', error);
     }
   }
 
@@ -821,33 +881,7 @@
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
       ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
-      if (job.comfyPromptId) {
-        if (state.inference.pollTimer) window.clearInterval(state.inference.pollTimer);
-        const refreshJob = async () => {
-          try {
-            const updated = await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}`, { headers: {} });
-            state.inference.lastJob = updated;
-            setInferenceStatus(`ComfyUI 工作：${updated.status}${updated.outputs?.length ? `；已匯入 ${updated.outputs.length} 部影片` : ''}`);
-            ui.cancelInferenceButton.hidden = updated.status !== 'queued';
-            if (['succeeded', 'failed', 'cancelled'].includes(updated.status)) {
-              window.clearInterval(state.inference.pollTimer);
-              state.inference.pollTimer = null;
-              if (updated.status === 'succeeded') {
-                await listFolderItems();
-                renderLibrary();
-              }
-            }
-          } catch (error) {
-            setInferenceStatus(`查詢 ComfyUI 工作失敗：${error.message}`);
-            window.clearInterval(state.inference.pollTimer);
-            state.inference.pollTimer = null;
-          }
-        };
-        await refreshJob();
-        if (state.inference.lastJob && !['succeeded', 'failed', 'cancelled'].includes(state.inference.lastJob.status)) {
-          state.inference.pollTimer = window.setInterval(refreshJob, 2_500);
-        }
-      }
+      if (job.comfyPromptId) startInferenceJobPolling(job);
     } catch (error) {
       ui.workflowCheckButton.disabled = false;
       ui.cancelInferenceButton.hidden = true;
@@ -898,10 +932,7 @@
       state.inference.lastJob = cancelled;
       ui.cancelInferenceButton.hidden = true;
       setInferenceStatus(`已取消待執行工作：${cancelled.id}`);
-      if (state.inference.pollTimer) {
-        window.clearInterval(state.inference.pollTimer);
-        state.inference.pollTimer = null;
-      }
+      stopInferenceJobPolling();
     } catch (error) {
       setInferenceStatus(`取消工作失敗：${error.message}`);
     } finally {
