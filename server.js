@@ -24,6 +24,9 @@ const MAX_VIDEO_METADATA_BYTES = 32 * 1024 * 1024;
 const INFERENCE_JOBS_DIR_NAME = 'inference-jobs';
 const MODEL_SETUP_DIR_NAME = 'model-setup';
 const MAX_COMFY_WORKFLOW_BYTES = 10 * 1024 * 1024;
+const MAX_SEED = Number.MAX_SAFE_INTEGER;
+const SOURCE_IMAGES_DIR_NAME = 'sources';
+const SOURCE_IMAGE_EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
 const MODEL_CATALOG = [
   {
@@ -408,7 +411,7 @@ function validateVideoMetadata(item) {
   if (typeof item.fileName !== 'string' || !item.fileName.trim()) {
     throw createRequestError('影片 metadata 缺少有效的檔名。');
   }
-  for (const field of ['prompt', 'story', 'moduleId', 'moduleName', 'resolution', 'quality']) {
+  for (const field of ['prompt', 'story', 'negativePrompt', 'moduleId', 'moduleName', 'resolution', 'quality']) {
     if (item[field] !== undefined && (typeof item[field] !== 'string' || item[field].length > 5_000)) {
       throw createRequestError(`影片 metadata 欄位無效：${field}。`);
     }
@@ -423,6 +426,9 @@ function validateVideoMetadata(item) {
     || item.sourceImageDataUrl.length > 28 * 1024 * 1024
   )) {
     throw createRequestError('影片來源圖片資料格式錯誤或超過 20 MB。', 413);
+  }
+  if (item.seed !== undefined && (!Number.isSafeInteger(item.seed) || item.seed < 0 || item.seed > MAX_SEED)) {
+    throw createRequestError('影片 metadata 欄位無效：seed。');
   }
   return item;
 }
@@ -510,6 +516,14 @@ function getComfyUIConfig(options = {}) {
   };
 }
 
+function generateSeed() {
+  return crypto.randomInt(0, 2 ** 48 - 1);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
 function validateInferencePayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw createRequestError('推論工作資料格式錯誤。');
@@ -524,6 +538,18 @@ function validateInferencePayload(payload) {
     || payload.sourceImageDataUrl.length > 28 * 1024 * 1024
   )) {
     throw createRequestError('來源圖片資料格式錯誤或超過 20 MB。', 413);
+  }
+  if (payload.negativePrompt !== undefined && typeof payload.negativePrompt !== 'string') {
+    throw createRequestError('負面提示詞格式錯誤。');
+  }
+  const negativePrompt = (payload.negativePrompt || '').trim();
+  if (negativePrompt.length > 5_000) {
+    throw createRequestError('負面提示詞不可超過 5,000 字。');
+  }
+  const hasSeed = payload.seed !== undefined && payload.seed !== null && payload.seed !== '';
+  const seed = hasSeed ? Number(payload.seed) : generateSeed();
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > MAX_SEED) {
+    throw createRequestError(`seed 必須是 0 至 ${MAX_SEED} 的整數。`);
   }
   const requestedModelId = typeof payload.videoModelId === 'string' ? payload.videoModelId : '';
   const videoModel = VIDEO_MODEL_CATALOG.find((model) => model.id === requestedModelId);
@@ -553,6 +579,9 @@ function validateInferencePayload(payload) {
   return {
     prompt,
     story,
+    negativePrompt,
+    seed,
+    seedMode: hasSeed ? 'fixed' : 'random',
     moduleId: typeof payload.moduleId === 'string' ? payload.moduleId.slice(0, 100) : '',
     videoModelId: videoModel?.id || VIDEO_MODEL_CATALOG[0].id,
     sourceImageDataUrl: payload.sourceImageDataUrl || '',
@@ -744,11 +773,12 @@ function createApp(options = {}) {
       throw createRequestError('ComfyUI 工作流不存在或超過 10 MB。', 400);
     }
     try {
-      const workflow = JSON.parse(await fs.readFile(comfyUI.workflowPath, 'utf8'));
+      const raw = await fs.readFile(comfyUI.workflowPath);
+      const workflow = JSON.parse(raw.toString('utf8'));
       if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
         throw new Error('workflow must be an object');
       }
-      return workflow;
+      return { workflow, workflowSha256: sha256(raw) };
     } catch {
       throw createRequestError('ComfyUI 工作流必須是有效的 API 格式 JSON。', 400);
     }
@@ -785,6 +815,7 @@ function createApp(options = {}) {
       'model_id',
       'story',
       'negative_prompt',
+      'seed',
       'width',
       'height',
       'duration',
@@ -862,20 +893,57 @@ function createApp(options = {}) {
         limitations: [],
       };
     }
-    const workflow = await loadComfyWorkflow();
-    return inspectComfyWorkflow(workflow, modelId, payload.hasSourceImage === true);
+    const { workflow, workflowSha256 } = await loadComfyWorkflow();
+    return {
+      ...inspectComfyWorkflow(workflow, modelId, payload.hasSourceImage === true),
+      workflowSha256,
+    };
   }
 
-  async function uploadComfySourceImage(dataUrl) {
+  function getSourceImagesDir() {
+    return path.join(outputDir, INFERENCE_JOBS_DIR_NAME, SOURCE_IMAGES_DIR_NAME);
+  }
+
+  async function storeSourceImage(dataUrl) {
     const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z\d+/=]+)$/iu.exec(dataUrl);
     if (!match) throw createRequestError('來源圖片僅支援 PNG、JPEG 或 WebP。', 400);
     const image = Buffer.from(match[2], 'base64');
     if (!image.length || image.length > 20 * 1024 * 1024) {
       throw createRequestError('來源圖片不得為空或超過 20 MB。', 400);
     }
-    const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[match[1].toLowerCase()];
+    const mimeType = match[1].toLowerCase();
+    const extension = SOURCE_IMAGE_EXTENSIONS[mimeType];
+    const imageSha256 = sha256(image);
+    const fileName = `${imageSha256}.${extension}`;
+    const imagePath = path.join(getSourceImagesDir(), fileName);
+    if (!(await fileExists(imagePath))) {
+      await fs.mkdir(getSourceImagesDir(), { recursive: true });
+      const temporaryPath = `${imagePath}.${crypto.randomUUID()}.tmp`;
+      await fs.writeFile(temporaryPath, image);
+      await fs.rename(temporaryPath, imagePath);
+    }
+    return { image, mimeType, extension, sha256: imageSha256, fileName };
+  }
+
+  async function loadStoredSourceImage(fileName) {
+    const match = /^([a-f\d]{64})\.(png|jpg|webp)$/u.exec(String(fileName || ''));
+    if (!match) throw createRequestError('工作記錄的來源圖片檔名無效。', 409);
+    const image = await fs.readFile(path.join(getSourceImagesDir(), fileName)).catch(() => null);
+    if (!image || sha256(image) !== match[1]) {
+      throw createRequestError('找不到原工作的來源圖片快照或內容已變更，無法重現。', 409);
+    }
+    const mimeType = Object.keys(SOURCE_IMAGE_EXTENSIONS).find((type) => SOURCE_IMAGE_EXTENSIONS[type] === match[2]);
+    return { image, mimeType, extension: match[2], sha256: match[1], fileName };
+  }
+
+  async function uploadComfySourceImage(source) {
     const form = new FormData();
-    form.append('image', new Blob([image], { type: match[1] }), `vediofactory-${crypto.randomUUID()}.${extension}`);
+    // Content-addressed name keeps the submitted prompt JSON identical across reruns.
+    form.append(
+      'image',
+      new Blob([source.image], { type: source.mimeType }),
+      `vediofactory-${source.sha256.slice(0, 32)}.${source.extension}`,
+    );
     form.append('overwrite', 'true');
     const response = await requestComfyUI('/upload/image', { method: 'POST', body: form });
     const result = await response.json();
@@ -978,6 +1046,10 @@ function createApp(options = {}) {
         moduleName: 'ComfyUI',
         prompt: job.prompt,
         story: job.story,
+        negativePrompt: job.negativePrompt || '',
+        seed: job.seed,
+        videoModelId: job.videoModelId,
+        workflowSha256: job.workflowSha256,
         duration: Number(job.settings.duration) || 0,
         fps: Number(job.settings.fps) || 24,
         resolution,
@@ -1220,6 +1292,9 @@ function createApp(options = {}) {
       updatedAt: new Date().toISOString(),
       prompt: inference.prompt,
       story: inference.story,
+      negativePrompt: inference.negativePrompt,
+      seed: inference.seed,
+      seedMode: inference.seedMode,
       moduleId: inference.moduleId,
       videoModelId: inference.videoModelId,
       settings: inference.settings,
@@ -1239,7 +1314,7 @@ function createApp(options = {}) {
       if (!runtime.comfyUI.available) {
         throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
       }
-      const workflow = await loadComfyWorkflow();
+      const { workflow, workflowSha256 } = await loadComfyWorkflow();
       const preflight = inspectComfyWorkflow(
         workflow,
         inference.videoModelId,
@@ -1249,15 +1324,21 @@ function createApp(options = {}) {
         throw createRequestError(`ComfyUI 工作流預檢失敗：${preflight.errors.join(' ')}`);
       }
       job.workflowPreflight = preflight;
-      const sourceImage = inference.sourceImageDataUrl
-        ? await uploadComfySourceImage(inference.sourceImageDataUrl)
-        : '';
+      job.workflowPath = comfyUI.workflowPath;
+      job.workflowSha256 = workflowSha256;
+      let sourceImage = '';
+      if (inference.sourceImageDataUrl) {
+        const source = await storeSourceImage(inference.sourceImageDataUrl);
+        sourceImage = await uploadComfySourceImage(source);
+        job.sourceImage = { fileName: source.fileName, sha256: source.sha256, comfyName: sourceImage };
+      }
       const resolution = String(job.settings.resolution || '1280x720').split('x').map(Number);
       const variables = {
         prompt: job.prompt || job.story,
         model_id: inference.videoModelId,
         story: job.story,
-        negative_prompt: '',
+        negative_prompt: job.negativePrompt,
+        seed: job.seed,
         width: resolution[0],
         height: resolution[1],
         duration: Number(job.settings.duration) || 6,
@@ -1271,20 +1352,110 @@ function createApp(options = {}) {
       if (/\{\{[^{}]+\}\}/u.test(JSON.stringify(apiWorkflow))) {
         throw createRequestError('工作流含有未支援的佔位符。', 400);
       }
-      const submission = await requestComfyUI('/prompt', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: apiWorkflow, client_id: crypto.randomUUID() }),
-      }).then((response) => response.json());
-      if (!submission.prompt_id || (submission.node_errors && Object.keys(submission.node_errors).length)) {
-        throw createRequestError(`ComfyUI 拒絕工作流：${JSON.stringify(submission.node_errors || submission)}`, 400);
-      }
+      job.submittedWorkflow = apiWorkflow;
+      job.comfyUIVersion = await getComfyUIVersion();
+      const submission = await submitComfyWorkflow(apiWorkflow);
       job.comfyPromptId = submission.prompt_id;
       job.queuePosition = submission.number;
       job.status = 'queued';
       job.guidance = '已提交至本機 ComfyUI。請確認工作流輸出 .webm，完成後影片會匯入專案資料夾。';
     }
 
+    await persistInferenceJob(job);
+    return job;
+  }
+
+  async function submitComfyWorkflow(apiWorkflow) {
+    const submission = await requestComfyUI('/prompt', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: apiWorkflow, client_id: crypto.randomUUID() }),
+    }).then((response) => response.json());
+    if (!submission.prompt_id || (submission.node_errors && Object.keys(submission.node_errors).length)) {
+      throw createRequestError(`ComfyUI 拒絕工作流：${JSON.stringify(submission.node_errors || submission)}`, 400);
+    }
+    return submission;
+  }
+
+  async function getComfyUIVersion() {
+    try {
+      const response = await requestComfyUI('/system_stats', { signal: AbortSignal.timeout(5_000) });
+      const stats = await response.json();
+      return typeof stats?.system?.comfyui_version === 'string' ? stats.system.comfyui_version : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function rerunInferenceJob(jobId) {
+    const jobs = await listInferenceJobs();
+    const original = jobs.find((item) => item.id === jobId);
+    if (!original) throw createRequestError('找不到推論工作。', 404);
+    if (!original.submittedWorkflow || typeof original.submittedWorkflow !== 'object') {
+      throw createRequestError('此工作沒有保存送出的工作流快照（可能建立於舊版本），無法完整重現。', 409);
+    }
+    const runtime = await getInferenceRuntime(outputDir, comfyUI);
+    if (!runtime.comfyUI.available) {
+      throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
+    }
+
+    const warnings = [];
+    if (original.sourceImage) {
+      const source = await loadStoredSourceImage(original.sourceImage.fileName);
+      const comfyName = await uploadComfySourceImage(source);
+      if (comfyName !== original.sourceImage.comfyName) {
+        warnings.push(`ComfyUI 回傳的來源圖片名稱（${comfyName}）與原工作不同，產出可能不一致。`);
+      }
+    }
+    let currentWorkflowSha256 = '';
+    if (comfyUI.workflowPath) {
+      currentWorkflowSha256 = await loadComfyWorkflow().then((loaded) => loaded.workflowSha256, () => '');
+    }
+    if (currentWorkflowSha256 !== original.workflowSha256) {
+      warnings.push('目前設定的工作流已變更或無法讀取；本次使用原工作保存的工作流快照重新產出，與目前工作流的結果可能不同。');
+    }
+    const comfyUIVersion = await getComfyUIVersion();
+    if (original.comfyUIVersion && comfyUIVersion && comfyUIVersion !== original.comfyUIVersion) {
+      warnings.push(`ComfyUI 版本已由 ${original.comfyUIVersion} 變更為 ${comfyUIVersion}，產出可能不一致。`);
+    }
+
+    const submission = await submitComfyWorkflow(original.submittedWorkflow);
+    const rerunJobId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const job = {
+      id: rerunJobId,
+      status: 'queued',
+      provider: original.provider,
+      createdAt: now,
+      updatedAt: now,
+      rerunOf: original.id,
+      prompt: original.prompt,
+      story: original.story,
+      negativePrompt: original.negativePrompt || '',
+      seed: original.seed,
+      seedMode: 'fixed',
+      moduleId: original.moduleId,
+      videoModelId: original.videoModelId,
+      settings: original.settings,
+      sourceImageAttached: original.sourceImageAttached,
+      sourceImage: original.sourceImage,
+      modelDir: runtime.modelDir,
+      workflowConfigured: original.workflowConfigured,
+      comfyUIUrl: comfyUI.baseUrl,
+      workflowPath: original.workflowPath,
+      workflowSha256: original.workflowSha256,
+      submittedWorkflow: original.submittedWorkflow,
+      comfyUIVersion,
+      warnings,
+      comfyPromptId: submission.prompt_id,
+      queuePosition: submission.number,
+      guidance: '已使用原工作的工作流快照與 seed 重新提交至本機 ComfyUI。',
+      manifestPath: path.join(
+        outputDir,
+        INFERENCE_JOBS_DIR_NAME,
+        `${Date.now()}-${rerunJobId}-${sanitizePathSegment(original.moduleId, 'job')}.json`,
+      ),
+    };
     await persistInferenceJob(job);
     return job;
   }
@@ -1331,6 +1502,11 @@ function createApp(options = {}) {
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {
       const body = await readJsonBody(request);
       return sendJson(response, 201, await createInferenceJob(body));
+    }
+
+    const rerunJobMatch = /^\/api\/inference\/jobs\/([^/]+)\/rerun$/u.exec(requestUrl.pathname);
+    if (rerunJobMatch && request.method === 'POST') {
+      return sendJson(response, 201, await rerunInferenceJob(decodeURIComponent(rerunJobMatch[1])));
     }
 
     const cancelJobMatch = /^\/api\/inference\/jobs\/([^/]+)\/cancel$/u.exec(requestUrl.pathname);

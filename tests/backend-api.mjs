@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -91,7 +92,7 @@ async function main() {
       const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
       assert.match(setupManifestText, new RegExp(manifest.modelId));
       assert.match(setupManifestText, /comfyui-local/);
-      assert.match(setupManifestText, new RegExp(catalog.installRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.ok(JSON.parse(setupManifestText).installPath.startsWith(catalog.installRoot));
     }
     const setupBatchAgain = await fetch(`${origin}/api/models/setup-batch`, {
       method: 'POST',
@@ -309,11 +310,32 @@ async function main() {
       body: JSON.stringify({ prompt: 'unknown model', videoModelId: 'not-a-model' }),
     });
     assert.equal(unknownVideoModelResponse.status, 400);
+    for (const invalidSeed of [-1, 1.5, 'abc', Number.MAX_SAFE_INTEGER + 1]) {
+      const invalidSeedResponse = await fetch(`${origin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'invalid seed', seed: invalidSeed }),
+      });
+      assert.equal(invalidSeedResponse.status, 400, String(invalidSeed));
+      assert.match((await invalidSeedResponse.json()).error, /seed/);
+    }
+    const invalidNegativeResponse = await fetch(`${origin}/api/inference/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'invalid negative', negativePrompt: 123 }),
+    });
+    assert.equal(invalidNegativeResponse.status, 400);
+    const scaffoldedRerunResponse = await fetch(`${origin}/api/inference/jobs/${inferenceJob.id}/rerun`, { method: 'POST' });
+    assert.equal(scaffoldedRerunResponse.status, 409);
+    assert.match((await scaffoldedRerunResponse.json()).error, /快照/);
+    const missingRerunResponse = await fetch(`${origin}/api/inference/jobs/not-found/rerun`, { method: 'POST' });
+    assert.equal(missingRerunResponse.status, 404);
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
 
     let comfyWorkflow;
+    const comfyWorkflows = [];
     let comfyRunning = false;
     let comfyFinished = false;
     let comfyPromptCount = 0;
@@ -331,6 +353,7 @@ async function main() {
       } else if (request.url === '/prompt' && request.method === 'POST') {
         comfyPromptCount += 1;
         comfyWorkflow = JSON.parse(body).prompt;
+        comfyWorkflows.push(comfyWorkflow);
         response.end(JSON.stringify({
           prompt_id: comfyPromptCount === 1 ? 'comfy-prompt-123' : 'comfy-prompt-cancel',
           number: comfyPromptCount,
@@ -372,12 +395,15 @@ async function main() {
     const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
-    await fs.writeFile(workflowPath, JSON.stringify({
+    const workflowText = JSON.stringify({
       '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
       '2': { class_type: 'ModelLoader', inputs: { model: '{{model_id}}' } },
       '3': { class_type: 'LoadImage', inputs: { image: '{{source_image}}' } },
       '4': { class_type: 'SaveWEBM', inputs: { format: 'webm' } },
-    }));
+      '5': { class_type: 'KSampler', inputs: { seed: '{{seed}}', negative: '{{negative_prompt}}' } },
+    });
+    await fs.writeFile(workflowPath, workflowText);
+    const workflowSha256 = crypto.createHash('sha256').update(workflowText).digest('hex');
     const comfyApp = await startServer({
       port: 0,
       host: '127.0.0.1',
@@ -397,8 +423,9 @@ async function main() {
         body: JSON.stringify({ videoModelId: 'wan-2.1-t2v-1.3b', hasSourceImage: true }),
       }).then((response) => response.json());
       assert.equal(preflight.ready, true);
-      assert.equal(preflight.nodeCount, 4);
-      assert.deepEqual(preflight.placeholders, ['model_id', 'prompt', 'source_image']);
+      assert.equal(preflight.nodeCount, 5);
+      assert.equal(preflight.workflowSha256, workflowSha256);
+      assert.deepEqual(preflight.placeholders, ['model_id', 'negative_prompt', 'prompt', 'seed', 'source_image']);
       assert.deepEqual(preflight.videoOutputNodes, [{ id: '4', classType: 'SaveWEBM' }]);
       assert.equal(preflight.warnings.length, 0);
       const noImagePreflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
@@ -408,22 +435,41 @@ async function main() {
       }).then((response) => response.json());
       assert.equal(noImagePreflight.ready, false);
       assert.match(noImagePreflight.errors[0], /需要來源圖片/);
+      const reproduciblePayload = {
+        prompt: '本機 ComfyUI 測試',
+        negativePrompt: 'blurry, watermark',
+        seed: 42,
+        moduleId: 'cinematic-motion',
+        videoModelId: 'wan-2.1-t2v-1.3b',
+        sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+        settings: { resolution: '1280x720', duration: 2, fps: 24 },
+      };
       const comfyJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt: '本機 ComfyUI 測試',
-          moduleId: 'cinematic-motion',
-          videoModelId: 'wan-2.1-t2v-1.3b',
-          sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
-          settings: { resolution: '1280x720', duration: 2, fps: 24 },
-        }),
+        body: JSON.stringify(reproduciblePayload),
       }).then((response) => response.json());
       assert.equal(comfyJob.status, 'queued');
       assert.equal(comfyJob.comfyPromptId, 'comfy-prompt-123');
       assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
       assert.equal(comfyWorkflow['2'].inputs.model, 'wan-2.1-t2v-1.3b');
       assert.equal(comfyWorkflow['3'].inputs.image, 'upload/test.png');
+      assert.equal(comfyWorkflow['5'].inputs.seed, 42);
+      assert.equal(comfyWorkflow['5'].inputs.negative, 'blurry, watermark');
+      assert.equal(comfyJob.seed, 42);
+      assert.equal(comfyJob.seedMode, 'fixed');
+      assert.equal(comfyJob.negativePrompt, 'blurry, watermark');
+      assert.equal(comfyJob.workflowSha256, workflowSha256);
+      assert.deepEqual(comfyJob.submittedWorkflow, comfyWorkflow);
+      const sourceImageSha256 = crypto.createHash('sha256').update('hello').digest('hex');
+      assert.equal(comfyJob.sourceImage.sha256, sourceImageSha256);
+      assert.equal(
+        await fs.readFile(path.join(comfyOutputDir, 'inference-jobs', 'sources', `${sourceImageSha256}.png`), 'utf8'),
+        'hello',
+      );
+      const persistedComfyJob = JSON.parse(await fs.readFile(comfyJob.manifestPath, 'utf8'));
+      assert.equal(persistedComfyJob.seed, 42);
+      assert.deepEqual(persistedComfyJob.submittedWorkflow, comfyWorkflow);
       const queuedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(queuedJob.status, 'queued');
 
@@ -443,6 +489,10 @@ async function main() {
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
       assert.equal(importedVideos.length, 1);
       assert.match(importedVideos[0].fileName, /\.webm$/u);
+      assert.equal(importedVideos[0].seed, 42);
+      assert.equal(importedVideos[0].negativePrompt, 'blurry, watermark');
+      assert.equal(importedVideos[0].workflowSha256, workflowSha256);
+      assert.equal(importedVideos[0].inferenceJobId, comfyJob.id);
 
       const pendingJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',
@@ -455,6 +505,9 @@ async function main() {
         }),
       }).then((response) => response.json());
       assert.equal(pendingJob.status, 'queued');
+      assert.equal(pendingJob.seedMode, 'random');
+      assert.ok(Number.isSafeInteger(pendingJob.seed) && pendingJob.seed >= 0);
+      assert.equal(comfyWorkflows.at(-1)['5'].inputs.seed, pendingJob.seed);
       const persistedActiveJobs = await fetch(`${comfyAppOrigin}/api/inference/jobs`).then((response) => response.json());
       assert.ok(persistedActiveJobs.some((job) => job.id === pendingJob.id && job.comfyPromptId));
       const cancelledResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${pendingJob.id}/cancel`, {
@@ -467,6 +520,23 @@ async function main() {
       const persistedCancelledJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${pendingJob.id}`).then((response) => response.json());
       assert.equal(persistedCancelledJob.status, 'cancelled');
 
+      // Same workflow + seed + parameters must produce an identical prompt JSON.
+      await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(reproduciblePayload),
+      }).then((response) => response.json());
+      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+
+      const rerunResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
+      assert.equal(rerunResponse.status, 201);
+      const rerunJob = await rerunResponse.json();
+      assert.equal(rerunJob.rerunOf, comfyJob.id);
+      assert.equal(rerunJob.seed, 42);
+      assert.equal(rerunJob.status, 'queued');
+      assert.deepEqual(rerunJob.warnings, []);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+
       await fs.writeFile(workflowPath, JSON.stringify({
         '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{unknown_value}}' } },
       }));
@@ -477,6 +547,18 @@ async function main() {
       }).then((response) => response.json());
       assert.equal(invalidPreflight.ready, false);
       assert.match(invalidPreflight.errors[0], /不支援的佔位符/);
+
+      // Rerun uses the stored snapshot even after the configured workflow changes, and warns about it.
+      const changedRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' })
+        .then((response) => response.json());
+      assert.equal(changedRerun.warnings.length, 1);
+      assert.match(changedRerun.warnings[0], /工作流已變更/);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+
+      await fs.rm(path.join(comfyOutputDir, 'inference-jobs', 'sources', `${sourceImageSha256}.png`));
+      const missingSourceRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
+      assert.equal(missingSourceRerun.status, 409);
+      assert.match((await missingSourceRerun.json()).error, /來源圖片快照/);
     } finally {
       await new Promise((resolve) => comfyApp.server.close(resolve));
       await new Promise((resolve) => comfyServer.close(resolve));

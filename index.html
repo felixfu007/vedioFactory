@@ -132,6 +132,23 @@
             影片模型建議
             <select id="videoModelSelect"></select>
           </label>
+          <label>
+            負面提示詞（可選）
+            <textarea id="negativePromptInput" rows="2" maxlength="5000" placeholder="例如：blurry, watermark, low quality"></textarea>
+          </label>
+          <div class="parameter-grid">
+            <label>
+              Seed 模式
+              <select id="seedModeInput">
+                <option value="random" selected>每次隨機</option>
+                <option value="fixed">固定</option>
+              </select>
+            </label>
+            <label>
+              Seed
+              <input id="seedInput" type="number" min="0" max="9007199254740991" step="1" placeholder="隨機產生" disabled />
+            </label>
+          </div>
           <button id="workflowCheckButton" type="button" class="secondary">檢查 ComfyUI 工作流</button>
           <p id="workflowCheckStatus" class="status-text">尚未檢查工作流。</p>
           <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
@@ -195,7 +212,7 @@
           <button data-action="download" type="button" class="secondary">下載</button>
           <button data-action="rename" type="button" class="secondary">重新命名</button>
           <button data-action="clip" type="button" class="secondary">剪輯輸出</button>
-          <button data-action="regenerate" type="button" class="secondary">重新產出</button>
+          <button data-action="regenerate" type="button" class="secondary">以相同設定重新產出</button>
           <button data-action="delete" type="button" class="danger">刪除</button>
         </div>
       </article>

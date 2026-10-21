@@ -107,6 +107,9 @@
     ui.modelCatalogGrid = document.querySelector('#modelCatalogGrid');
     ui.videoModelCatalogGrid = document.querySelector('#videoModelCatalogGrid');
     ui.videoModelSelect = document.querySelector('#videoModelSelect');
+    ui.negativePromptInput = document.querySelector('#negativePromptInput');
+    ui.seedModeInput = document.querySelector('#seedModeInput');
+    ui.seedInput = document.querySelector('#seedInput');
     ui.modelCatalogStatus = document.querySelector('#modelCatalogStatus');
     ui.setupModelBatchButton = document.querySelector('#setupModelBatchButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
@@ -566,6 +569,7 @@
         ['畫質', item.quality],
         ['解析度', item.resolution],
         ['來源', item.sourceImageDataUrl ? '照片 + 提示詞' : '純文字描述'],
+        ...(Number.isSafeInteger(item.seed) ? [['Seed', String(item.seed)]] : []),
       ].forEach(([label, value]) => {
         const wrapper = document.createElement('div');
         const dt = document.createElement('dt');
@@ -822,6 +826,42 @@
     }
   }
 
+  function syncSeedInput() {
+    const fixed = ui.seedModeInput.value === 'fixed';
+    ui.seedInput.disabled = !fixed;
+    ui.seedInput.placeholder = fixed ? '輸入 0 以上的整數' : '隨機產生';
+    if (fixed && !ui.seedInput.value && Number.isSafeInteger(state.inference.lastJob?.seed)) {
+      ui.seedInput.value = String(state.inference.lastJob.seed);
+    }
+  }
+
+  function readSeedSetting() {
+    if (ui.seedModeInput.value !== 'fixed') return undefined;
+    const value = ui.seedInput.value.trim();
+    const seed = Number(value);
+    if (!/^\d+$/u.test(value) || !Number.isSafeInteger(seed)) {
+      throw new Error('固定 seed 必須是 0 以上的整數。');
+    }
+    return seed;
+  }
+
+  function describeInferenceJob(job) {
+    const warnings = job.warnings?.length ? `；注意：${job.warnings.join(' ')}` : '';
+    return `${job.id}（${job.status}${Number.isSafeInteger(job.seed) ? `，seed ${job.seed}` : ''}）${warnings}`;
+  }
+
+  async function rerunInferenceJob(jobId) {
+    if (!state.backend.available) {
+      throw new Error('目前未連線到本機後端，無法重新產出 ComfyUI 影片。');
+    }
+    const job = await fetchJson(`/api/inference/jobs/${encodeURIComponent(jobId)}/rerun`, { method: 'POST' });
+    state.inference.lastJob = job;
+    setInferenceStatus(`已以相同設定重新提交：${describeInferenceJob(job)}`);
+    ui.cancelInferenceButton.hidden = job.status !== 'queued';
+    startInferenceJobPolling(job);
+    return job;
+  }
+
   async function queueInferenceJob() {
     try {
       if (!state.backend.available) {
@@ -836,6 +876,7 @@
         setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
         return;
       }
+      const seed = readSeedSetting();
 
       ui.workflowCheckButton.disabled = true;
       const workflowCheck = await fetchJson('/api/inference/workflow-check', {
@@ -857,6 +898,8 @@
         body: JSON.stringify({
           prompt: spec.prompt,
           story: spec.story,
+          negativePrompt: ui.negativePromptInput.value.trim(),
+          seed,
           moduleId: spec.moduleId,
           videoModelId: ui.videoModelSelect.value,
           sourceImageDataUrl: spec.sourceImageDataUrl,
@@ -872,7 +915,7 @@
       });
 
       state.inference.lastJob = job;
-      setInferenceStatus(`已建立本機推論工作：${job.id}（${job.status}）`);
+      setInferenceStatus(`已建立本機推論工作：${describeInferenceJob(job)}`);
       ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
       if (job.comfyPromptId) startInferenceJobPolling(job);
     } catch (error) {
@@ -1206,6 +1249,12 @@
 
   async function regenerateItem(item) {
     try {
+      if (item.inferenceJobId) {
+        setStatus(`正在以 ${item.fileName} 的工作流快照與 seed 重新提交 ComfyUI…`);
+        await rerunInferenceJob(item.inferenceJobId);
+        setStatus(`已重新提交 ComfyUI 工作，完成後會匯入影片庫。`);
+        return;
+      }
       setStatus(`正在依照 ${item.fileName} 的設定重新產出…`);
       const cloneSpec = {
         ...item,
@@ -1270,6 +1319,7 @@
     ui.cancelInferenceButton.addEventListener('click', cancelInferenceJob);
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
+    ui.seedModeInput.addEventListener('change', syncSeedInput);
   }
 
   async function initApp() {
