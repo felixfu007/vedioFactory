@@ -1,2 +1,7 @@
 node_modules/
 visual-output/
+.venv-qa/
+tests/.cache/
+__pycache__/
+tests/fixtures/output/
+logs/

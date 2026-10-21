@@ -1,0 +1,852 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan_animate_2_distill_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Wan Animate 2 14B (distilled, int8 convrot)"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "UMT5-XXL text encoder"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "Wan2_1_VAE_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Wan 2.1 VAE"
+    }
+  },
+  "4": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "clip_vision_h.safetensors"
+    },
+    "_meta": {
+      "title": "CLIP vision H"
+    }
+  },
+  "5": {
+    "class_type": "WanAnimate2Cache",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "device": "cpu",
+      "dtype": "int8"
+    },
+    "_meta": {
+      "title": "Pose-branch cache in system RAM (int8)"
+    }
+  },
+  "6": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "shift": 5
+    }
+  },
+  "7": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "lcm"
+    }
+  },
+  "8": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": "{{steps}}",
+      "denoise": 1
+    }
+  },
+  "10": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "Character appearance description: the exact same person as in the reference image, same face, same facial features, same hairstyle and hair color, same clothes and shoes, photorealistic, sharp detailed face, face fully visible and not covered by hair. Background description: the person is {{prompt}}; the same setting, animals, vehicles and objects as in the motion video, realistic anatomy, natural daylight, steady camera."
+    },
+    "_meta": {
+      "title": "Positive: character appearance + background from the user prompt (no motion words)"
+    }
+  },
+  "11": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "{{negative_prompt}} different person, face change, changing face, changing hairstyle, changing outfit, morphing, hair covering face, face hidden by hair, face obscured, extra limbs, extra arms, extra fingers, blurry face, deformed face, nsfw, revealing clothing, 色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+    },
+    "_meta": {
+      "title": "Negative"
+    }
+  },
+  "12": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "The person is {{prompt}}. Full body, realistic natural motion."
+    },
+    "_meta": {
+      "title": "Pose branch prompt (motion)"
+    }
+  },
+  "13": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{source_image}}"
+    },
+    "_meta": {
+      "title": "Reference photo (identity)"
+    }
+  },
+  "14": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "{{driving_video}}"
+    },
+    "_meta": {
+      "title": "Driving video (stage-1 general clip, motion source)"
+    }
+  },
+  "15": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "14",
+        0
+      ]
+    }
+  },
+  "16": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Driving frame count F"
+    }
+  },
+  "17": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "4 * ceil((a - 1) / 16) + 1",
+      "values.a": [
+        "16",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Per-segment length L = 4*ceil((F-1)/16)+1 (4 segments, 4*L-3 >= F)"
+    }
+  },
+  "18": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "4",
+        0
+      ],
+      "image": [
+        "13",
+        0
+      ],
+      "crop": "none"
+    },
+    "_meta": {
+      "title": "CLIP vision of reference"
+    }
+  },
+  "19": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "15",
+        0
+      ],
+      "batch_index": 0,
+      "length": 1
+    },
+    "_meta": {
+      "title": "Driving first frame"
+    }
+  },
+  "20": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "4",
+        0
+      ],
+      "image": [
+        "19",
+        0
+      ],
+      "crop": "none"
+    },
+    "_meta": {
+      "title": "CLIP vision of driving first frame"
+    }
+  },
+  "100": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": [
+        "17",
+        1
+      ],
+      "batch_size": 1,
+      "reference_image": [
+        "13",
+        0
+      ],
+      "pose_video": [
+        "15",
+        0
+      ],
+      "clip_vision_output": [
+        "18",
+        0
+      ],
+      "positive_pose": [
+        "12",
+        0
+      ],
+      "clip_vision_output_pose": [
+        "20",
+        0
+      ],
+      "video_frame_offset": 0,
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": "{{reference_strength}}"
+    },
+    "_meta": {
+      "title": "Segment 1 conditioning"
+    }
+  },
+  "101": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": "{{seed}}",
+      "cfg": 1,
+      "positive": [
+        "100",
+        0
+      ],
+      "negative": [
+        "100",
+        1
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "100",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Segment 1 sampler"
+    }
+  },
+  "102": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "101",
+        0
+      ],
+      "trim_amount": [
+        "100",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Segment 1 drop reference latent"
+    }
+  },
+  "103": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "102",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 1 decode"
+    }
+  },
+  "110": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": [
+        "17",
+        1
+      ],
+      "batch_size": 1,
+      "reference_image": [
+        "13",
+        0
+      ],
+      "pose_video": [
+        "15",
+        0
+      ],
+      "clip_vision_output": [
+        "18",
+        0
+      ],
+      "positive_pose": [
+        "12",
+        0
+      ],
+      "clip_vision_output_pose": [
+        "20",
+        0
+      ],
+      "video_frame_offset": [
+        "100",
+        5
+      ],
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": "{{reference_strength}}",
+      "continue_motion": [
+        "103",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 2 conditioning"
+    }
+  },
+  "111": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": "{{seed}}",
+      "cfg": 1,
+      "positive": [
+        "110",
+        0
+      ],
+      "negative": [
+        "110",
+        1
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "110",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Segment 2 sampler"
+    }
+  },
+  "112": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "111",
+        0
+      ],
+      "trim_amount": [
+        "110",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Segment 2 drop reference latent"
+    }
+  },
+  "113": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "112",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 2 decode"
+    }
+  },
+  "114": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "113",
+        0
+      ],
+      "batch_index": 1,
+      "length": 4096
+    },
+    "_meta": {
+      "title": "Segment 2 without repeated continue_motion frame"
+    }
+  },
+  "120": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": [
+        "17",
+        1
+      ],
+      "batch_size": 1,
+      "reference_image": [
+        "13",
+        0
+      ],
+      "pose_video": [
+        "15",
+        0
+      ],
+      "clip_vision_output": [
+        "18",
+        0
+      ],
+      "positive_pose": [
+        "12",
+        0
+      ],
+      "clip_vision_output_pose": [
+        "20",
+        0
+      ],
+      "video_frame_offset": [
+        "110",
+        5
+      ],
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": "{{reference_strength}}",
+      "continue_motion": [
+        "113",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 3 conditioning"
+    }
+  },
+  "121": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": "{{seed}}",
+      "cfg": 1,
+      "positive": [
+        "120",
+        0
+      ],
+      "negative": [
+        "120",
+        1
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "120",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Segment 3 sampler"
+    }
+  },
+  "122": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "121",
+        0
+      ],
+      "trim_amount": [
+        "120",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Segment 3 drop reference latent"
+    }
+  },
+  "123": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "122",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 3 decode"
+    }
+  },
+  "124": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "123",
+        0
+      ],
+      "batch_index": 1,
+      "length": 4096
+    },
+    "_meta": {
+      "title": "Segment 3 without repeated continue_motion frame"
+    }
+  },
+  "130": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": [
+        "17",
+        1
+      ],
+      "batch_size": 1,
+      "reference_image": [
+        "13",
+        0
+      ],
+      "pose_video": [
+        "15",
+        0
+      ],
+      "clip_vision_output": [
+        "18",
+        0
+      ],
+      "positive_pose": [
+        "12",
+        0
+      ],
+      "clip_vision_output_pose": [
+        "20",
+        0
+      ],
+      "video_frame_offset": [
+        "120",
+        5
+      ],
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": "{{reference_strength}}",
+      "continue_motion": [
+        "123",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 4 conditioning"
+    }
+  },
+  "131": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": "{{seed}}",
+      "cfg": 1,
+      "positive": [
+        "130",
+        0
+      ],
+      "negative": [
+        "130",
+        1
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "130",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Segment 4 sampler"
+    }
+  },
+  "132": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "131",
+        0
+      ],
+      "trim_amount": [
+        "130",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Segment 4 drop reference latent"
+    }
+  },
+  "133": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "132",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Segment 4 decode"
+    }
+  },
+  "134": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "133",
+        0
+      ],
+      "batch_index": 1,
+      "length": 4096
+    },
+    "_meta": {
+      "title": "Segment 4 without repeated continue_motion frame"
+    }
+  },
+  "200": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "103",
+        0
+      ],
+      "image2": [
+        "114",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Concat segments 1..2"
+    }
+  },
+  "201": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "200",
+        0
+      ],
+      "image2": [
+        "124",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Concat segments 1..3"
+    }
+  },
+  "202": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "201",
+        0
+      ],
+      "image2": [
+        "134",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Concat segments 1..4"
+    }
+  },
+  "210": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "202",
+        0
+      ],
+      "batch_index": 0,
+      "length": [
+        "16",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Trim to driving frame count F"
+    }
+  },
+  "211": {
+    "class_type": "SaveWEBM",
+    "inputs": {
+      "images": [
+        "210",
+        0
+      ],
+      "filename_prefix": "vediofactory/wan22-animate-general",
+      "codec": "vp9",
+      "fps": [
+        "15",
+        2
+      ],
+      "crf": 28
+    },
+    "_meta": {
+      "title": "WebM output (frame count and fps follow the driving video)",
+      "vediofactory": {
+        "stage": 2,
+        "requires": [
+          "driving_video"
+        ],
+        "segments": 4
+      }
+    }
+  }
+}

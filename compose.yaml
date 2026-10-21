@@ -6,6 +6,8 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8000
+      # The browser sends Host: localhost:<published port>; the API only accepts loopback hosts on these ports.
+      VEDIO_FACTORY_PUBLIC_PORT: ${VEDIO_FACTORY_PORT:-8000}
       VEDIO_FACTORY_OUTPUT_DIR: /data/output
       VEDIO_FACTORY_MODEL_DIR: /data/models
       VEDIO_FACTORY_COMFYUI_URL: http://host.docker.internal:8188

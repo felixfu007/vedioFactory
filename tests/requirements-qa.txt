@@ -1,0 +1,10 @@
+# QA-only Python dependencies for tests/dance-video-verify.py (CPU only).
+# Install into the isolated venv:
+#   python -m venv .venv-qa
+#   .venv-qa\Scripts\python.exe -m pip install -r tests/requirements-qa.txt
+# Verified on Windows 11, CPython 3.10.11 (x64).
+# mediapipe 0.10.21 depends on opencv-contrib-python, so do not also install
+# opencv-python / opencv-python-headless (two cv2 wheels overwrite each other).
+mediapipe==0.10.21
+opencv-contrib-python==4.11.0.86
+numpy==1.26.4

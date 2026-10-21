@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { listenOnFetchSafePort, startOnFetchSafePort } from './safe-port.mjs';
 
 const require = createRequire(import.meta.url);
-const { startServer } = require('../server.js');
+const { startServer: startServerRaw } = require('../server.js');
+const startServer = (options) => startOnFetchSafePort(startServerRaw, options);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -40,6 +42,8 @@ async function main() {
     assert.equal(runtime.localGpuPreferred, true);
     assert.equal(runtime.outputDir, managedOutputDir);
     assert.ok(Array.isArray(runtime.guidance));
+    // No workflow configured: no segment information to report.
+    assert.equal(runtime.comfyUI.workflowSegments, null);
     const dockerHostApp = await startServer({
       port: 0,
       host: '127.0.0.1',
@@ -91,7 +95,7 @@ async function main() {
       const setupManifestText = await fs.readFile(manifest.manifestPath, 'utf8');
       assert.match(setupManifestText, new RegExp(manifest.modelId));
       assert.match(setupManifestText, /comfyui-local/);
-      assert.match(setupManifestText, new RegExp(catalog.installRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.ok(JSON.parse(setupManifestText).installPath.startsWith(catalog.installRoot));
     }
     const setupBatchAgain = await fetch(`${origin}/api/models/setup-batch`, {
       method: 'POST',
@@ -216,6 +220,27 @@ async function main() {
     const videoPayload = await fetch(`${origin}/api/videos/${encodeURIComponent('api-test-renamed.webm')}`).then((response) => response.arrayBuffer());
     assert.equal(Buffer.from(videoPayload).toString('utf8'), 'fake-webm-content');
 
+    // Downloading a non-Latin-1 file name must not crash writeHead (it used to return 500 for Chinese names).
+    const unicodeName = '中文 影片.webm';
+    const unicodeRenamed = await fetch(`${origin}/api/videos/${encodeURIComponent('api-test-renamed.webm')}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nextFileName: unicodeName }),
+    }).then((response) => response.json());
+    const unicodeDownload = await fetch(`${origin}/api/videos/${encodeURIComponent(unicodeRenamed.fileName)}?download=1`);
+    assert.equal(unicodeDownload.status, 200);
+    assert.equal(Buffer.from(await unicodeDownload.arrayBuffer()).toString('utf8'), 'fake-webm-content');
+    const disposition = unicodeDownload.headers.get('content-disposition');
+    assert.match(disposition, /^attachment; filename="[\x20-\x7e]+"; /u);
+    assert.doesNotMatch(disposition.match(/filename="(.*)"; /u)[1], /["\\]/u);
+    const encodedName = disposition.match(/filename\*=UTF-8''(.+)$/u)[1];
+    assert.equal(decodeURIComponent(encodedName), unicodeRenamed.fileName);
+    await fetch(`${origin}/api/videos/${encodeURIComponent(unicodeRenamed.fileName)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nextFileName: 'api-test-renamed.webm' }),
+    }).then((response) => assert.equal(response.status, 200));
+
     const collisionItems = ['rename-left.webm', 'rename-right.webm'];
     await Promise.all(collisionItems.map((fileName) => fetch(`${origin}/api/videos`, {
       method: 'POST',
@@ -309,6 +334,22 @@ async function main() {
       body: JSON.stringify({ prompt: 'unknown model', videoModelId: 'not-a-model' }),
     });
     assert.equal(unknownVideoModelResponse.status, 400);
+    // Portrait/landscape TI2V-5B sizes (544x960 is the measured 16GB sweet spot) are accepted; odd sizes are not.
+    for (const resolution of ['544x960', '960x544', '704x1280', '1280x704']) {
+      const sizedJob = await fetch(`${origin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'size', videoModelId: 'wan-2.2-ti2v-5b', settings: { duration: 2, resolution } }),
+      });
+      assert.equal(sizedJob.status, 201, resolution);
+      assert.equal((await sizedJob.json()).settings.resolution, resolution);
+    }
+    const oddSizeResponse = await fetch(`${origin}/api/inference/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'size', settings: { duration: 2, resolution: '545x960' } }),
+    });
+    assert.equal(oddSizeResponse.status, 400);
 
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
@@ -368,7 +409,7 @@ async function main() {
         response.end(JSON.stringify({ error: 'not found' }));
       }
     });
-    await new Promise((resolve) => comfyServer.listen(0, '127.0.0.1', resolve));
+    await listenOnFetchSafePort(comfyServer);
     const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
@@ -415,7 +456,7 @@ async function main() {
           prompt: '本機 ComfyUI 測試',
           moduleId: 'cinematic-motion',
           videoModelId: 'wan-2.1-t2v-1.3b',
-          sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+          sourceImageDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
           settings: { resolution: '1280x720', duration: 2, fps: 24 },
         }),
       }).then((response) => response.json());
@@ -450,7 +491,7 @@ async function main() {
         body: JSON.stringify({
           prompt: '待取消的本機工作',
           videoModelId: 'wan-2.1-t2v-1.3b',
-          sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+          sourceImageDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
           settings: { resolution: '1280x720', duration: 2, fps: 24 },
         }),
       }).then((response) => response.json());

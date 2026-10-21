@@ -1,0 +1,423 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Wan 2.2 TI2V-5B"
+    },
+    "inputs": {
+      "unet_name": "wan2.2_ti2v_5B_fp16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "UMT5-XXL text encoder"
+    },
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Wan 2.2 VAE"
+    },
+    "inputs": {
+      "vae_name": "wan2.2_vae.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "12",
+        0
+      ],
+      "shift": 8
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive (user prompt + default dance prompt)"
+    },
+    "inputs": {
+      "text": "{{prompt}} The same person from the photo keeps dancing energetically and continuously for the whole clip: upbeat full-body dance facing the camera, bouncing to the beat, stepping side to side, swinging the arms at chest height, pumping the fists, rolling the shoulders, swaying the hips and bending the knees, never stopping or freezing. The head stays upright and steady with the face toward the camera almost all the time; the energy comes from the arms, legs and hips, not from the head. Hair stays behind the shoulders and never covers the face. Same face, same hairstyle, same outfit and shoes as in the photo, face clearly visible and smiling. The whole body stays in frame from head to feet with space above the head. Fixed camera, locked-off wide shot, no zoom, no camera movement, plain background and lighting unchanged, realistic natural motion.",
+      "clip": [
+        "2",
+        0
+      ]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative"
+    },
+    "inputs": {
+      "text": "{{negative_prompt}} head spin, spinning around, turning around, back to camera, head banging, head whip, hair flip, hair whipping, hair covering face, face hidden by hair, face obscured, looking away, looking down, profile view, camera zoom, zoom in, camera movement, panning, close-up, cropped feet, cropped head, out of frame, colored lights, disco lights, neon, stage lights, flicker, changing outfit, changing hairstyle, different person, face change, morphing, extra limbs, extra arms, standing still, frozen, slow motion, nsfw, revealing clothing, 色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+        "2",
+        0
+      ]
+    }
+  },
+  "7": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Source image"
+    },
+    "inputs": {
+      "image": "{{source_image}}"
+    }
+  },
+  "8": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "_meta": {
+      "title": "Segment 1 latent"
+    },
+    "inputs": {
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": "{{frames}}",
+      "batch_size": 1,
+      "start_image": [
+        "7",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Segment 1 sampler"
+    },
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "seed": "{{seed}}",
+      "steps": "{{steps}}",
+      "cfg": 5,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "8",
+        0
+      ],
+      "denoise": 1
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Segment 1 decode"
+    },
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "11": {
+    "class_type": "SaveWEBM",
+    "_meta": {
+      "title": "WebM output (3 segments: 3 x frames - 2)",
+      "vediofactory": {
+        "segments": 3,
+        "overlapFrames": 1
+      }
+    },
+    "inputs": {
+      "images": [
+        "41",
+        0
+      ],
+      "filename_prefix": "vediofactory/wan22-ti2v-5b-dance-10s",
+      "codec": "vp9",
+      "fps": "{{fps}}",
+      "crf": 28
+    }
+  },
+  "12": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Optional LoRA (removed by vedioFactory when no LoRA is selected)"
+    },
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "lora_name": "{{lora_name}}",
+      "strength_model": "{{lora_strength}}"
+    }
+  },
+  "20": {
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Segment 1 last frame -> segment 2 start"
+    },
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "batch_index": -1,
+      "length": 1
+    }
+  },
+  "21": {
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Segment 2 seed = seed + 1"
+    },
+    "inputs": {
+      "expression": "a + 1",
+      "values.a": "{{seed}}"
+    }
+  },
+  "22": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "_meta": {
+      "title": "Segment 2 latent"
+    },
+    "inputs": {
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": "{{frames}}",
+      "batch_size": 1,
+      "start_image": [
+        "20",
+        0
+      ]
+    }
+  },
+  "23": {
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Segment 2 sampler"
+    },
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "seed": [
+        "21",
+        1
+      ],
+      "steps": "{{steps}}",
+      "cfg": 5,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "22",
+        0
+      ],
+      "denoise": 1
+    }
+  },
+  "24": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Segment 2 decode"
+    },
+    "inputs": {
+      "samples": [
+        "23",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "25": {
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Segment 2 without duplicated first frame"
+    },
+    "inputs": {
+      "image": [
+        "24",
+        0
+      ],
+      "batch_index": 1,
+      "length": 4096
+    }
+  },
+  "30": {
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Segment 2 last frame -> segment 3 start"
+    },
+    "inputs": {
+      "image": [
+        "24",
+        0
+      ],
+      "batch_index": -1,
+      "length": 1
+    }
+  },
+  "31": {
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Segment 3 seed = seed + 2"
+    },
+    "inputs": {
+      "expression": "a + 2",
+      "values.a": "{{seed}}"
+    }
+  },
+  "32": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "_meta": {
+      "title": "Segment 3 latent"
+    },
+    "inputs": {
+      "vae": [
+        "3",
+        0
+      ],
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "length": "{{frames}}",
+      "batch_size": 1,
+      "start_image": [
+        "30",
+        0
+      ]
+    }
+  },
+  "33": {
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Segment 3 sampler"
+    },
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "seed": [
+        "31",
+        1
+      ],
+      "steps": "{{steps}}",
+      "cfg": 5,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "32",
+        0
+      ],
+      "denoise": 1
+    }
+  },
+  "34": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Segment 3 decode"
+    },
+    "inputs": {
+      "samples": [
+        "33",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "35": {
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Segment 3 without duplicated first frame"
+    },
+    "inputs": {
+      "image": [
+        "34",
+        0
+      ],
+      "batch_index": 1,
+      "length": 4096
+    }
+  },
+  "40": {
+    "class_type": "ImageBatch",
+    "_meta": {
+      "title": "Concat segment 1 + 2"
+    },
+    "inputs": {
+      "image1": [
+        "10",
+        0
+      ],
+      "image2": [
+        "25",
+        0
+      ]
+    }
+  },
+  "41": {
+    "class_type": "ImageBatch",
+    "_meta": {
+      "title": "Concat (1 + 2) + 3"
+    },
+    "inputs": {
+      "image1": [
+        "40",
+        0
+      ],
+      "image2": [
+        "35",
+        0
+      ]
+    }
+  }
+}

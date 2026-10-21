@@ -5,10 +5,17 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:dance": "node tools/start-dance.mjs",
     "test": "npm run test:api",
     "test:all": "npm run test:api && npm run test:visual",
-    "test:api": "node tests/backend-api.mjs",
-    "test:visual": "node tests/visual-verify.mjs"
+    "test:api": "node tests/backend-api.mjs && node tests/comfy-wan-workflow.mjs",
+    "test:visual": "node tests/visual-verify.mjs",
+    "test:dance": "python tests/dance-video-verify.py --video tests/fixtures/output/dance-e2e.webm --source tests/fixtures/dance-source.png --report visual-output/dance-e2e.report.json",
+    "test:dance:selftest": "python tests/dance-video-verify-selftest.py",
+    "test:dance:full": "python tests/dance-video-verify.py --video tests/fixtures/output/dance-full-e2e.webm --source tests/fixtures/dance-source.png --report visual-output/dance-full-e2e.report.json",
+    "e2e:dance": "node tests/run-dance-e2e.mjs",
+    "e2e:dance:full": "node tests/run-dance-full-e2e.mjs",
+    "gpu:monitor": "node tools/gpu-guard.mjs --interrupt"
   },
   "repository": {
     "type": "git",

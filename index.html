@@ -36,6 +36,70 @@
         </div>
       </section>
 
+      <section id="danceSection" class="card dance-card" aria-labelledby="danceTitle" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">一鍵完成</p>
+            <h2 id="danceTitle">照片 → 跳舞影片</h2>
+          </div>
+        </div>
+        <p class="hero-copy">
+          上傳一張本人的全身照片，系統會分兩個階段，在這台電腦上產生 10 秒以上、同一個人在跳舞的影片。
+        </p>
+        <div class="dance-grid">
+          <div class="panel">
+            <label>
+              全身照片（必填）
+              <input id="danceImageInput" type="file" accept="image/*" />
+            </label>
+            <ul class="dance-tips">
+              <li>全身入鏡：從頭到腳都在畫面內</li>
+              <li>正面站立，臉部清楚、不要被頭髮或物品遮住</li>
+              <li>背景單純，畫面中只有一個人</li>
+            </ul>
+            <img id="danceImagePreview" class="dance-preview" alt="已選擇的照片預覽" hidden />
+          </div>
+          <div class="panel">
+            <label>
+              影片長度
+              <select id="danceDurationSelect"></select>
+            </label>
+            <p id="danceDurationHint" class="hint"></p>
+            <label>
+              解析度
+              <select id="danceResolutionSelect">
+                <option value="544x960" selected>544 × 960（建議）</option>
+                <option value="480x832">480 × 832（較快，畫質較低）</option>
+                <option value="704x1280">704 × 1280（畫質較高，可能失敗）</option>
+              </select>
+            </label>
+            <p class="hint">解析度越高，越可能超過顯示卡的 16 GB 顯示記憶體而失敗。</p>
+            <p id="danceResolutionWarning" class="status-text warning-text" role="alert" hidden></p>
+            <details class="dance-advanced">
+              <summary>進階設定（一般不需要調整）</summary>
+              <label>
+                本人相似度（參考強度）
+                <input id="danceReferenceStrengthInput" type="number" min="0.5" max="2" step="0.1" />
+              </label>
+              <p id="danceReferenceStrengthHint" class="hint"></p>
+              <label>
+                舞蹈描述（選填，留空使用預設）
+                <textarea id="dancePromptInput" rows="2" placeholder="例如：照片中的人開心地跳舞"></textarea>
+              </label>
+            </details>
+          </div>
+        </div>
+        <p id="danceEstimate" class="hint dance-estimate"></p>
+        <p id="danceSetupStatus" class="status-text warning-text" role="alert" hidden></p>
+        <p id="danceGuardWarning" class="status-text warning-text" hidden></p>
+        <div class="dance-actions">
+          <button id="danceStartButton" type="button" class="primary">開始產生跳舞影片</button>
+          <button id="danceCancelButton" type="button" class="secondary" hidden>取消這個工作</button>
+        </div>
+        <p id="danceStatus" class="status-text" role="status"></p>
+        <div id="pipelineProgress" class="pipeline-progress" aria-live="polite" hidden></div>
+      </section>
+
       <section class="card controls-grid">
         <div class="panel">
           <h2>1. 選擇輸入素材</h2>
@@ -98,9 +162,12 @@
                 解析度
                 <select id="resolutionInput">
                   <option value="1280x720" selected>1280 × 720</option>
+                  <option value="1280x704">1280 × 704（Wan 5B 原生）</option>
                   <option value="1920x1080">1920 × 1080</option>
                   <option value="1080x1080">1080 × 1080</option>
                   <option value="720x1280">720 × 1280</option>
+                  <option value="832x480">832 × 480（AI 測試）</option>
+                  <option value="480x832">480 × 832（AI 測試）</option>
                 </select>
               </label>
               <label>
@@ -132,6 +199,20 @@
             影片模型建議
             <select id="videoModelSelect"></select>
           </label>
+          <p id="videoModelHint" class="hint" hidden></p>
+          <p id="frameLimitWarning" class="status-text warning-text" role="alert" hidden></p>
+          <button id="applyModelDefaultsButton" type="button" class="secondary" hidden>套用此模型建議設定</button>
+          <label>
+            LoRA（選用）
+            <select id="loraSelect">
+              <option value="" selected>無</option>
+            </select>
+          </label>
+          <label>
+            LoRA 強度（0–2）
+            <input id="loraStrengthInput" type="number" min="0" max="2" step="0.05" value="1" disabled />
+          </label>
+          <p id="loraHint" class="hint" hidden></p>
           <button id="workflowCheckButton" type="button" class="secondary">檢查 ComfyUI 工作流</button>
           <p id="workflowCheckStatus" class="status-text">尚未檢查工作流。</p>
           <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
@@ -157,7 +238,7 @@
         <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
       </section>
 
-      <section class="card">
+      <section id="librarySection" class="card">
         <div class="section-header">
           <div>
             <p class="eyebrow">Library</p>

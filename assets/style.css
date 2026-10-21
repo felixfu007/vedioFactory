@@ -103,6 +103,11 @@ textarea {
   color: var(--muted);
 }
 
+.warning-text {
+  color: #ffd27a;
+  font-weight: 600;
+}
+
 .hero-status {
   display: grid;
   gap: 1rem;
@@ -281,5 +286,176 @@ textarea {
 
   .layout {
     width: min(100% - 1rem, 100%);
+  }
+}
+
+#loraHint {
+  white-space: pre-line;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* 照片 → 跳舞影片 preset */
+.dance-card {
+  display: grid;
+  gap: 1rem;
+  border-color: rgba(137, 169, 255, 0.45);
+}
+
+.dance-card .section-header {
+  margin-bottom: 0;
+}
+
+.dance-card .hero-copy {
+  margin: 0;
+}
+
+.dance-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dance-grid .panel {
+  align-content: start;
+}
+
+.dance-tips {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  display: grid;
+  gap: 0.3rem;
+}
+
+.dance-preview {
+  max-width: 100%;
+  max-height: 320px;
+  justify-self: start;
+  border-radius: 18px;
+  border: 1px solid rgba(151, 171, 196, 0.2);
+  object-fit: contain;
+  background: rgba(6, 16, 28, 0.8);
+}
+
+.dance-advanced {
+  display: grid;
+  gap: 0.75rem;
+  border-radius: 18px;
+  padding: 0.75rem 1rem;
+  background: rgba(7, 17, 31, 0.6);
+  border: 1px solid rgba(151, 171, 196, 0.12);
+}
+
+.dance-advanced summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.dance-advanced[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+.dance-advanced label + .hint {
+  margin-top: 0.4rem;
+}
+
+.dance-estimate {
+  margin: 0;
+}
+
+.dance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.pipeline-progress {
+  display: grid;
+  gap: 0.75rem;
+  border-radius: 22px;
+  padding: 1rem;
+  background: rgba(7, 17, 31, 0.68);
+  border: 1px solid rgba(151, 171, 196, 0.16);
+}
+
+.pipeline-progress p {
+  margin: 0;
+}
+
+.pipeline-headline {
+  font-weight: 600;
+}
+
+.pipeline-stage-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.pipeline-stages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pipeline-stage {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(17, 28, 44, 0.68);
+  border-left: 4px solid rgba(151, 171, 196, 0.3);
+}
+
+.pipeline-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.stage-badge {
+  border-radius: 999px;
+  padding: 0.15rem 0.65rem;
+  font-size: 0.85rem;
+  background: rgba(151, 171, 196, 0.15);
+  color: var(--text);
+}
+
+.pipeline-stage[data-stage-status="running"],
+.pipeline-stage[data-stage-status="queued"],
+.pipeline-stage[data-stage-status="pending"] {
+  border-left-color: var(--primary);
+}
+
+.pipeline-stage[data-stage-status="cooling"] {
+  border-left-color: #ffd27a;
+}
+
+.pipeline-stage[data-stage-status="succeeded"] {
+  border-left-color: #6fdc9b;
+}
+
+.pipeline-stage[data-stage-status="failed"],
+.pipeline-stage[data-stage-status="cancelled"] {
+  border-left-color: var(--danger);
+}
+
+.pipeline-cooling {
+  color: #ffd27a;
+}
+
+.pipeline-error {
+  color: #ffc5cf;
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .dance-grid {
+    grid-template-columns: 1fr;
   }
 }
