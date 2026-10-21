@@ -22,6 +22,12 @@
       pollInFlight: false,
     },
     modelCatalog: null,
+    presets: [],
+    activePresetId: '',
+    libraryFilter: {
+      client: '',
+      project: '',
+    },
   };
 
   const storageKey = 'vedioFactory.library';
@@ -113,6 +119,22 @@
     ui.modelCatalogStatus = document.querySelector('#modelCatalogStatus');
     ui.setupModelBatchButton = document.querySelector('#setupModelBatchButton');
     ui.cardTemplate = document.querySelector('#videoCardTemplate');
+    ui.clientInput = document.querySelector('#clientInput');
+    ui.projectInput = document.querySelector('#projectInput');
+    ui.clientOptions = document.querySelector('#clientOptions');
+    ui.projectOptions = document.querySelector('#projectOptions');
+    ui.presetSelect = document.querySelector('#presetSelect');
+    ui.presetVariables = document.querySelector('#presetVariables');
+    ui.presetStatus = document.querySelector('#presetStatus');
+    ui.applyPresetButton = document.querySelector('#applyPresetButton');
+    ui.savePresetButton = document.querySelector('#savePresetButton');
+    ui.updatePresetButton = document.querySelector('#updatePresetButton');
+    ui.deletePresetButton = document.querySelector('#deletePresetButton');
+    ui.exportPresetsButton = document.querySelector('#exportPresetsButton');
+    ui.importPresetsButton = document.querySelector('#importPresetsButton');
+    ui.importPresetsInput = document.querySelector('#importPresetsInput');
+    ui.libraryClientFilter = document.querySelector('#libraryClientFilter');
+    ui.libraryProjectFilter = document.querySelector('#libraryProjectFilter');
   }
 
   function getFolderLabel(input) {
@@ -438,6 +460,9 @@
       quality: ui.qualityInput.value,
       motion: Number(ui.motionInput.value),
       captionStrength: Number(ui.captionInput.value),
+      client: ui.clientInput.value.trim(),
+      project: ui.projectInput.value.trim(),
+      presetId: state.activePresetId,
       sourceImageDataUrl: '',
       createdAt: new Date().toISOString(),
       ...overrides,
@@ -539,11 +564,50 @@
     return URL.createObjectURL(file);
   }
 
+  function fillSelectOptions(select, values, emptyLabel) {
+    const selected = select.value;
+    select.replaceChildren(new Option(emptyLabel, ''));
+    values.forEach((value) => select.append(new Option(value, value)));
+    select.value = values.includes(selected) ? selected : '';
+  }
+
+  function distinctValues(items, field) {
+    const collator = new Intl.Collator('zh-Hant');
+    return [...new Set(items.map((item) => item[field]).filter(Boolean))].sort(collator.compare);
+  }
+
+  function renderProjectOptions() {
+    const sources = [...state.library, ...state.presets];
+    const clients = distinctValues(sources, 'client');
+    const client = ui.clientInput.value.trim();
+    const projects = distinctValues(sources.filter((item) => !client || item.client === client), 'project');
+    ui.clientOptions.replaceChildren(...clients.map((value) => new Option(value)));
+    ui.projectOptions.replaceChildren(...projects.map((value) => new Option(value)));
+  }
+
+  function renderLibraryFilters() {
+    fillSelectOptions(ui.libraryClientFilter, distinctValues(state.library, 'client'), '全部客戶');
+    const client = ui.libraryClientFilter.value;
+    const projectSource = state.library.filter((item) => !client || item.client === client);
+    fillSelectOptions(ui.libraryProjectFilter, distinctValues(projectSource, 'project'), '全部專案');
+    state.libraryFilter.client = ui.libraryClientFilter.value;
+    state.libraryFilter.project = ui.libraryProjectFilter.value;
+  }
+
   function renderLibrary() {
     ui.libraryGrid.innerHTML = '';
-    ui.libraryEmpty.hidden = state.library.length > 0;
+    renderLibraryFilters();
+    renderProjectOptions();
+    const { client, project } = state.libraryFilter;
+    const visibleItems = state.library.filter((item) => (
+      (!client || item.client === client) && (!project || item.project === project)
+    ));
+    ui.libraryEmpty.hidden = visibleItems.length > 0;
+    ui.libraryEmpty.textContent = state.library.length
+      ? '沒有符合篩選條件的影片。'
+      : '尚未找到影片。先生成一段影片，或重新選擇已有產出的本機資料夾。';
 
-    state.library.forEach((item) => {
+    visibleItems.forEach((item) => {
       const fragment = ui.cardTemplate.content.cloneNode(true);
       const card = fragment.querySelector('.video-card');
       const video = fragment.querySelector('video');
@@ -570,6 +634,7 @@
         ['解析度', item.resolution],
         ['來源', item.sourceImageDataUrl ? '照片 + 提示詞' : '純文字描述'],
         ...(Number.isSafeInteger(item.seed) ? [['Seed', String(item.seed)]] : []),
+        ...(item.client || item.project ? [['客戶／專案', [item.client, item.project].filter(Boolean).join(' / ')]] : []),
       ].forEach(([label, value]) => {
         const wrapper = document.createElement('div');
         const dt = document.createElement('dt');
@@ -850,6 +915,236 @@
     return `${job.id}（${job.status}${Number.isSafeInteger(job.seed) ? `，seed ${job.seed}` : ''}）${warnings}`;
   }
 
+  function setPresetStatus(message) {
+    ui.presetStatus.textContent = message;
+  }
+
+  function getSelectedPreset() {
+    return state.presets.find((preset) => preset.id === ui.presetSelect.value) || null;
+  }
+
+  function describePreset(preset) {
+    const scope = [preset.client, preset.project].filter(Boolean).join(' / ');
+    return scope ? `${scope}｜${preset.name}` : preset.name;
+  }
+
+  function syncPresetUi() {
+    const hasBackend = state.backend.available;
+    const preset = getSelectedPreset();
+    [ui.savePresetButton, ui.exportPresetsButton, ui.importPresetsButton].forEach((button) => {
+      button.disabled = !hasBackend;
+    });
+    [ui.applyPresetButton, ui.updatePresetButton, ui.deletePresetButton].forEach((button) => {
+      button.disabled = !hasBackend || !preset;
+    });
+    renderPresetVariables(preset);
+  }
+
+  function renderPresetOptions() {
+    const selected = ui.presetSelect.value;
+    ui.presetSelect.replaceChildren(new Option('（不使用預設）', ''));
+    state.presets.forEach((preset) => ui.presetSelect.append(new Option(describePreset(preset), preset.id)));
+    ui.presetSelect.value = state.presets.some((preset) => preset.id === selected) ? selected : '';
+    syncPresetUi();
+    renderProjectOptions();
+  }
+
+  function renderPresetVariables(preset) {
+    const variables = preset?.variables ?? [];
+    const previousValues = Object.fromEntries(
+      [...ui.presetVariables.querySelectorAll('input')].map((input) => [input.dataset.variable, input.value]),
+    );
+    ui.presetVariables.replaceChildren(...variables.map((name) => {
+      const label = document.createElement('label');
+      label.textContent = `變數 {${name}}`;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 1000;
+      input.dataset.variable = name;
+      input.value = previousValues[name] ?? '';
+      label.append(input);
+      return label;
+    }));
+    ui.presetVariables.hidden = variables.length === 0;
+  }
+
+  function fillTemplate(template, values) {
+    return String(template || '').replace(/(?<!\{)\{([\p{L}\p{N}_]{1,40})\}(?!\})/gu, (token, name) => (
+      values[name] ? values[name] : token
+    ));
+  }
+
+  async function loadPresets() {
+    if (!state.backend.available) {
+      setPresetStatus('參數預設需要本機後端；目前為瀏覽器模式。');
+      syncPresetUi();
+      return;
+    }
+    try {
+      state.presets = await fetchJson('/api/presets', { headers: {} });
+      renderPresetOptions();
+      setPresetStatus(state.presets.length ? `已載入 ${state.presets.length} 個參數預設。` : '尚未建立參數預設。');
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`載入參數預設失敗：${error.message}`);
+    }
+  }
+
+  function collectPresetFields() {
+    const seedMode = ui.seedModeInput.value;
+    return {
+      client: ui.clientInput.value.trim(),
+      project: ui.projectInput.value.trim(),
+      promptTemplate: ui.promptInput.value.trim(),
+      storyTemplate: ui.storyInput.value.trim(),
+      negativePrompt: ui.negativePromptInput.value.trim(),
+      moduleId: ui.moduleSelect.value,
+      videoModelId: ui.videoModelSelect.value,
+      seedMode,
+      seed: readSeedSetting() ?? null,
+      settings: {
+        duration: Number(ui.durationInput.value),
+        fps: Number(ui.fpsInput.value),
+        resolution: ui.resolutionInput.value,
+        quality: ui.qualityInput.value,
+        motion: Number(ui.motionInput.value),
+        captionStrength: Number(ui.captionInput.value),
+      },
+    };
+  }
+
+  function setSelectValue(select, value) {
+    if (value && [...select.options].some((option) => option.value === value)) {
+      select.value = value;
+      return true;
+    }
+    return false;
+  }
+
+  function applySelectedPreset() {
+    const preset = getSelectedPreset();
+    if (!preset) return;
+    const values = Object.fromEntries(
+      [...ui.presetVariables.querySelectorAll('input')].map((input) => [input.dataset.variable, input.value.trim()]),
+    );
+    const missing = preset.variables.filter((name) => !values[name]);
+    ui.promptInput.value = fillTemplate(preset.promptTemplate, values);
+    ui.storyInput.value = fillTemplate(preset.storyTemplate, values);
+    ui.negativePromptInput.value = preset.negativePrompt || '';
+    ui.clientInput.value = preset.client || ui.clientInput.value;
+    ui.projectInput.value = preset.project || ui.projectInput.value;
+    if (setSelectValue(ui.moduleSelect, preset.moduleId)) renderModuleDetails();
+    setSelectValue(ui.videoModelSelect, preset.videoModelId);
+    ui.durationInput.value = String(preset.settings.duration);
+    setSelectValue(ui.fpsInput, String(preset.settings.fps));
+    setSelectValue(ui.resolutionInput, preset.settings.resolution);
+    setSelectValue(ui.qualityInput, preset.settings.quality);
+    ui.motionInput.value = String(preset.settings.motion);
+    ui.captionInput.value = String(preset.settings.captionStrength);
+    ui.seedModeInput.value = preset.seedMode;
+    ui.seedInput.value = preset.seedMode === 'fixed' ? String(preset.seed) : '';
+    syncSeedInput();
+    state.activePresetId = preset.id;
+    renderProjectOptions();
+    setPresetStatus(missing.length
+      ? `已套用「${preset.name}」，但尚未填入變數：${missing.map((name) => `{${name}}`).join('、')}`
+      : `已套用「${preset.name}」。`);
+  }
+
+  async function savePreset() {
+    try {
+      const fields = collectPresetFields();
+      const name = window.prompt('請輸入預設名稱', getSelectedPreset()?.name ?? '')?.trim();
+      if (!name) return;
+      const preset = await fetchJson('/api/presets', {
+        method: 'POST',
+        body: JSON.stringify({ ...fields, name }),
+      });
+      await loadPresets();
+      ui.presetSelect.value = preset.id;
+      state.activePresetId = preset.id;
+      syncPresetUi();
+      setPresetStatus(`已儲存預設「${preset.name}」${preset.variables.length ? `，含變數 ${preset.variables.map((item) => `{${item}}`).join('、')}` : ''}。`);
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`儲存預設失敗：${error.message}`);
+    }
+  }
+
+  async function updatePreset() {
+    const preset = getSelectedPreset();
+    if (!preset) return;
+    try {
+      if (!window.confirm(`確定以目前設定覆蓋預設「${preset.name}」嗎？`)) return;
+      const updated = await fetchJson(`/api/presets/${encodeURIComponent(preset.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...collectPresetFields(), name: preset.name, description: preset.description }),
+      });
+      await loadPresets();
+      ui.presetSelect.value = updated.id;
+      syncPresetUi();
+      setPresetStatus(`已更新預設「${updated.name}」。`);
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`更新預設失敗：${error.message}`);
+    }
+  }
+
+  async function deletePreset() {
+    const preset = getSelectedPreset();
+    if (!preset) return;
+    try {
+      if (!window.confirm(`確定刪除預設「${preset.name}」嗎？`)) return;
+      await fetchJson(`/api/presets/${encodeURIComponent(preset.id)}`, { method: 'DELETE' });
+      if (state.activePresetId === preset.id) state.activePresetId = '';
+      ui.presetSelect.value = '';
+      await loadPresets();
+      setPresetStatus(`已刪除預設「${preset.name}」。`);
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`刪除預設失敗：${error.message}`);
+    }
+  }
+
+  async function exportPresets() {
+    try {
+      const payload = await fetchJson('/api/presets/export', { headers: {} });
+      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `vediofactory-presets-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      setPresetStatus(`已匯出 ${payload.presets.length} 個預設。`);
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`匯出預設失敗：${error.message}`);
+    }
+  }
+
+  async function importPresets() {
+    const file = ui.importPresetsInput.files?.[0];
+    ui.importPresetsInput.value = '';
+    if (!file) return;
+    try {
+      let payload;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        throw new Error('檔案不是有效的 JSON。');
+      }
+      const result = await fetchJson('/api/presets/import', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      await loadPresets();
+      setPresetStatus(`已匯入 ${result.imported} 個預設（相同 ID 的預設會被覆蓋）。`);
+    } catch (error) {
+      console.error(error);
+      setPresetStatus(`匯入預設失敗：${error.message}`);
+    }
+  }
+
   async function rerunInferenceJob(jobId) {
     if (!state.backend.available) {
       throw new Error('目前未連線到本機後端，無法重新產出 ComfyUI 影片。');
@@ -900,6 +1195,9 @@
           story: spec.story,
           negativePrompt: ui.negativePromptInput.value.trim(),
           seed,
+          client: spec.client,
+          project: spec.project,
+          presetId: spec.presetId,
           moduleId: spec.moduleId,
           videoModelId: ui.videoModelSelect.value,
           sourceImageDataUrl: spec.sourceImageDataUrl,
@@ -1320,6 +1618,26 @@
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
     ui.seedModeInput.addEventListener('change', syncSeedInput);
+    ui.presetSelect.addEventListener('change', () => {
+      if (!ui.presetSelect.value) state.activePresetId = '';
+      syncPresetUi();
+    });
+    ui.applyPresetButton.addEventListener('click', applySelectedPreset);
+    ui.savePresetButton.addEventListener('click', savePreset);
+    ui.updatePresetButton.addEventListener('click', updatePreset);
+    ui.deletePresetButton.addEventListener('click', deletePreset);
+    ui.exportPresetsButton.addEventListener('click', exportPresets);
+    ui.importPresetsButton.addEventListener('click', () => ui.importPresetsInput.click());
+    ui.importPresetsInput.addEventListener('change', importPresets);
+    ui.clientInput.addEventListener('change', renderProjectOptions);
+    ui.libraryClientFilter.addEventListener('change', () => {
+      state.libraryFilter.client = ui.libraryClientFilter.value;
+      renderLibrary();
+    });
+    ui.libraryProjectFilter.addEventListener('change', () => {
+      state.libraryFilter.project = ui.libraryProjectFilter.value;
+      renderLibrary();
+    });
   }
 
   async function initApp() {
@@ -1329,6 +1647,7 @@
     renderModuleOptions();
     attachEvents();
     await initBackend();
+    await loadPresets();
     syncStorageUi();
     renderLibrary();
   }

@@ -222,10 +222,91 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
   }
 }
 
+async function runPresetScenario(browser, origin, managedOutputDir) {
+  await resetDirectory(managedOutputDir);
+  const presetResponse = await fetch(`${origin}/api/presets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: 'IG 直式',
+      client: '客戶A',
+      project: '春季活動',
+      promptTemplate: '展示 {product}',
+      storyTemplate: '{product} 緩慢推近',
+      negativePrompt: 'blurry',
+      moduleId: 'neon-pulse',
+      videoModelId: 'wan-2.1-t2v-1.3b',
+      seedMode: 'fixed',
+      seed: 1234,
+      settings: { duration: 2, fps: 12, resolution: '720x1280', quality: 'draft', motion: 30, captionStrength: 40 },
+    }),
+  });
+  assert.equal(presetResponse.status, 201);
+  const preset = await presetResponse.json();
+  const page = await browser.newPage();
+  try {
+    await page.goto(origin, { waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 2);
+    await page.select('#presetSelect', preset.id);
+    await page.waitForSelector('#presetVariables input[data-variable="product"]');
+    await page.type('#presetVariables input[data-variable="product"]', '新款耳機');
+    await page.click('#applyPresetButton');
+    const applied = await page.evaluate(() => ({
+      prompt: document.querySelector('#promptInput').value,
+      story: document.querySelector('#storyInput').value,
+      negativePrompt: document.querySelector('#negativePromptInput').value,
+      moduleId: document.querySelector('#moduleSelect').value,
+      resolution: document.querySelector('#resolutionInput').value,
+      fps: document.querySelector('#fpsInput').value,
+      seedMode: document.querySelector('#seedModeInput').value,
+      seed: document.querySelector('#seedInput').value,
+      seedDisabled: document.querySelector('#seedInput').disabled,
+      client: document.querySelector('#clientInput').value,
+      project: document.querySelector('#projectInput').value,
+      status: document.querySelector('#presetStatus').textContent,
+    }));
+    assert.deepEqual(applied, {
+      prompt: '展示 新款耳機',
+      story: '新款耳機 緩慢推近',
+      negativePrompt: 'blurry',
+      moduleId: 'neon-pulse',
+      resolution: '720x1280',
+      fps: '12',
+      seedMode: 'fixed',
+      seed: '1234',
+      seedDisabled: false,
+      client: '客戶A',
+      project: '春季活動',
+      status: '已套用「IG 直式」。',
+    });
+
+    await page.click('#generateButton');
+    await page.waitForFunction(() => document.querySelectorAll('.video-card').length === 1, { timeout: 30_000 });
+    const [stored] = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(stored.client, '客戶A');
+    assert.equal(stored.project, '春季活動');
+    assert.equal(stored.presetId, preset.id);
+    const cardText = await page.$eval('.video-card .stats', (stats) => stats.textContent);
+    assert.match(cardText, /客戶A \/ 春季活動/u);
+
+    await page.select('#libraryClientFilter', '客戶A');
+    assert.equal(await page.$$eval('.video-card', (cards) => cards.length), 1);
+    const filterOptions = await page.$$eval('#libraryProjectFilter option', (options) => options.map((option) => option.value));
+    assert.deepEqual(filterOptions, ['', '春季活動']);
+
+    const pageScreenshotPath = path.join(outputDir, 'preset-page.png');
+    await page.screenshot({ path: pageScreenshotPath, fullPage: true });
+    return { presetId: preset.id, applied, pageScreenshotPath };
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   await ensureFixtures();
   const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-'));
-  const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir });
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-data-'));
+  const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir, dataDir });
   const address = app.server.address();
   const origin = `http://127.0.0.1:${address.port}`;
   const chromiumPath = await resolveChromiumPath();
@@ -241,6 +322,7 @@ async function main() {
     for (const scenario of scenarios) {
       results.push(await runScenario(browser, origin, scenario, managedOutputDir));
     }
+    const presetResult = await runPresetScenario(browser, origin, managedOutputDir);
 
     const report = {
       generatedAt: new Date().toISOString(),
@@ -257,6 +339,10 @@ async function main() {
         actualFramePath: path.relative(repoRoot, result.actualFramePath),
         referenceFramePath: path.relative(repoRoot, result.referenceFramePath),
       })),
+      presetScenario: {
+        ...presetResult,
+        pageScreenshotPath: path.relative(repoRoot, presetResult.pageScreenshotPath),
+      },
     };
 
     await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2));
@@ -265,6 +351,7 @@ async function main() {
     await browser.close();
     await new Promise((resolve) => app.server.close(resolve));
     await fs.rm(managedOutputDir, { recursive: true, force: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
   }
 }
 

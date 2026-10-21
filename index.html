@@ -36,6 +36,47 @@
         </div>
       </section>
 
+      <section class="card presets-card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Clients & presets</p>
+            <h2>客戶專案與參數預設</h2>
+          </div>
+        </div>
+        <div class="preset-grid">
+          <label>
+            客戶
+            <input id="clientInput" type="text" list="clientOptions" maxlength="100" placeholder="例如：客戶A" />
+          </label>
+          <label>
+            專案
+            <input id="projectInput" type="text" list="projectOptions" maxlength="100" placeholder="例如：春季活動" />
+          </label>
+          <label>
+            參數預設
+            <select id="presetSelect">
+              <option value="">（不使用預設）</option>
+            </select>
+          </label>
+        </div>
+        <div id="presetVariables" class="preset-grid" hidden></div>
+        <div class="preset-actions">
+          <button id="applyPresetButton" type="button" class="primary">套用預設</button>
+          <button id="savePresetButton" type="button" class="secondary">儲存目前設定為新預設</button>
+          <button id="updatePresetButton" type="button" class="secondary">以目前設定更新預設</button>
+          <button id="exportPresetsButton" type="button" class="secondary">匯出全部預設</button>
+          <button id="importPresetsButton" type="button" class="secondary">匯入預設</button>
+          <button id="deletePresetButton" type="button" class="danger">刪除預設</button>
+        </div>
+        <input id="importPresetsInput" type="file" accept="application/json,.json" hidden />
+        <p class="hint">
+          提示詞與影片描述可使用 <code>{product}</code> 這類變數；套用預設時會要求填入。客戶與專案會標記在之後產出的影片與推論工作上。
+        </p>
+        <p id="presetStatus" class="status-text">尚未載入參數預設。</p>
+        <datalist id="clientOptions"></datalist>
+        <datalist id="projectOptions"></datalist>
+      </section>
+
       <section class="card controls-grid">
         <div class="panel">
           <h2>1. 選擇輸入素材</h2>
@@ -181,6 +222,20 @@
             <h2>本機影片管理</h2>
           </div>
           <button id="refreshButton" type="button" class="secondary">重新整理清單</button>
+        </div>
+        <div class="preset-grid library-filters">
+          <label>
+            依客戶篩選
+            <select id="libraryClientFilter">
+              <option value="">全部客戶</option>
+            </select>
+          </label>
+          <label>
+            依專案篩選
+            <select id="libraryProjectFilter">
+              <option value="">全部專案</option>
+            </select>
+          </label>
         </div>
         <div id="libraryEmpty" class="empty-state">
           尚未找到影片。先生成一段影片，或重新選擇已有產出的本機資料夾。

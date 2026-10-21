@@ -62,7 +62,7 @@ npm start
 docker compose up --build -d
 ```
 
-開啟 `http://127.0.0.1:8000`。Compose 將影片輸出和模型參考目錄保存在 Docker volumes，`docker compose down` 不會刪除資料；`docker compose down -v` 會刪除這些資料。ComfyUI 模型仍須安裝在主機上的 ComfyUI 模型目錄；`/data/models` 不會自動同步到 ComfyUI。
+開啟 `http://127.0.0.1:8000`。Compose 將影片輸出、模型參考目錄和參數預設保存在 Docker volumes，`docker compose down` 不會刪除資料；`docker compose down -v` 會刪除這些資料。ComfyUI 模型仍須安裝在主機上的 ComfyUI 模型目錄；`/data/models` 不會自動同步到 ComfyUI。
 
 Docker 容器中的 `localhost` 指向容器本身，因此 Compose 使用 `host.docker.internal` 連回 Windows 主機。若要執行推論，ComfyUI 必須允許 Docker 容器連線（例如以 `--listen 0.0.0.0` 啟動），並在 Windows 防火牆限制存取範圍；不要將 ComfyUI 的 8188 埠公開到不可信的網路。若有 API 格式工作流，將它放在專案的 `workflows` 資料夾，並在啟動 Compose 前設定容器內路徑：
 
@@ -90,6 +90,7 @@ docker compose up --build -d
 | --- | --- | --- |
 | `VEDIO_FACTORY_OUTPUT_DIR` | `%USERPROFILE%\Videos\vedioFactory` | 影片輸出資料夾 |
 | `VEDIO_FACTORY_MODEL_DIR` | `%USERPROFILE%\vedioFactory\models` | 本機模型權重目錄 |
+| `VEDIO_FACTORY_DATA_DIR` | `%USERPROFILE%\vedioFactory` | 應用資料目錄；參數預設存於其下的 `presets/` |
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
 | `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | ComfyUI 匯出的 API 格式工作流 JSON 絕對路徑 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
@@ -104,6 +105,17 @@ $env:VEDIO_FACTORY_COMFYUI_URL="http://127.0.0.1:8188"
 $env:VEDIO_FACTORY_COMFYUI_WORKFLOW="C:\AI\vedioFactory\workflows\video-api.json"
 npm start
 ```
+
+## 客戶專案與參數預設
+
+頁面上方的「客戶專案與參數預設」區可以：
+
+- 填寫**客戶**與**專案**：之後產出的 Canvas 影片、ComfyUI 推論工作與匯入影片都會帶上這兩個標籤，影片庫可依客戶／專案篩選。
+- **儲存目前設定為新預設**：保存提示詞範本、影片描述範本、負面提示詞、生成模組、影片模型、長度/FPS/解析度/品質/運鏡/文字強度，以及 seed 模式（固定 seed 會一併保存）。
+- **範本變數**：提示詞或影片描述中寫 `{product}`、`{slogan}` 等變數，選擇預設後會出現對應欄位，按「套用預設」時填入。
+- **匯出／匯入**：匯出全部預設為 JSON，方便在其他機器或同事間交接；匯入時會先驗證全部內容，任一筆無效就不寫入任何預設，相同 ID 的預設會被覆蓋。
+
+預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
 
 ## 本機 ComfyUI 工作流推論
 

@@ -18,6 +18,14 @@ const DEFAULT_OUTPUT_DIR = path.resolve(
 const DEFAULT_MODEL_DIR = path.resolve(
   process.env.VEDIO_FACTORY_MODEL_DIR || path.join(os.homedir(), 'vedioFactory', 'models'),
 );
+const DEFAULT_DATA_DIR = path.resolve(
+  process.env.VEDIO_FACTORY_DATA_DIR || path.join(os.homedir(), 'vedioFactory'),
+);
+const PRESETS_DIR_NAME = 'presets';
+const PRESET_SCHEMA_VERSION = 1;
+const MAX_PRESETS_PER_IMPORT = 500;
+const MAX_TAG_LENGTH = 100;
+const UUID_PATTERN = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u;
 const MAX_JSON_BODY = 80 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024;
 const MAX_VIDEO_METADATA_BYTES = 32 * 1024 * 1024;
@@ -411,7 +419,9 @@ function validateVideoMetadata(item) {
   if (typeof item.fileName !== 'string' || !item.fileName.trim()) {
     throw createRequestError('影片 metadata 缺少有效的檔名。');
   }
-  for (const field of ['prompt', 'story', 'negativePrompt', 'moduleId', 'moduleName', 'resolution', 'quality']) {
+  for (const field of [
+    'prompt', 'story', 'negativePrompt', 'moduleId', 'moduleName', 'resolution', 'quality', 'client', 'project', 'presetId',
+  ]) {
     if (item[field] !== undefined && (typeof item[field] !== 'string' || item[field].length > 5_000)) {
       throw createRequestError(`影片 metadata 欄位無效：${field}。`);
     }
@@ -524,39 +534,38 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function validateInferencePayload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw createRequestError('推論工作資料格式錯誤。');
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readOptionalText(payload, field, label, maxLength) {
+  const value = payload[field];
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw createRequestError(`${label}格式錯誤。`);
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) {
+    throw createRequestError(`${label}不可超過 ${maxLength.toLocaleString('en-US')} 字。`);
   }
-  const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
-  const story = typeof payload.story === 'string' ? payload.story.trim() : '';
-  if ((!prompt && !story) || prompt.length > 5_000 || story.length > 5_000) {
-    throw createRequestError('提示詞與影片描述至少填一項，且不可超過 5,000 字。');
-  }
-  if (payload.sourceImageDataUrl && (
-    typeof payload.sourceImageDataUrl !== 'string'
-    || payload.sourceImageDataUrl.length > 28 * 1024 * 1024
-  )) {
-    throw createRequestError('來源圖片資料格式錯誤或超過 20 MB。', 413);
-  }
-  if (payload.negativePrompt !== undefined && typeof payload.negativePrompt !== 'string') {
-    throw createRequestError('負面提示詞格式錯誤。');
-  }
-  const negativePrompt = (payload.negativePrompt || '').trim();
-  if (negativePrompt.length > 5_000) {
-    throw createRequestError('負面提示詞不可超過 5,000 字。');
-  }
-  const hasSeed = payload.seed !== undefined && payload.seed !== null && payload.seed !== '';
-  const seed = hasSeed ? Number(payload.seed) : generateSeed();
+  return trimmed;
+}
+
+function validateSeed(value) {
+  const seed = Number(value);
   if (!Number.isSafeInteger(seed) || seed < 0 || seed > MAX_SEED) {
     throw createRequestError(`seed 必須是 0 至 ${MAX_SEED} 的整數。`);
   }
-  const requestedModelId = typeof payload.videoModelId === 'string' ? payload.videoModelId : '';
+  return seed;
+}
+
+function validateVideoModelId(value) {
+  const requestedModelId = typeof value === 'string' ? value : '';
   const videoModel = VIDEO_MODEL_CATALOG.find((model) => model.id === requestedModelId);
   if (requestedModelId && !videoModel) throw createRequestError('找不到所選影片模型。');
-  const settings = payload.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
-    ? payload.settings
-    : {};
+  return videoModel?.id || '';
+}
+
+function validateGenerationSettings(value) {
+  const settings = isPlainObject(value) ? value : {};
   const duration = Number(settings.duration ?? 6);
   const fps = Number(settings.fps ?? 24);
   const resolution = String(settings.resolution || '1280x720');
@@ -573,19 +582,85 @@ function validateInferencePayload(payload) {
   if (!['draft', 'balanced', 'premium'].includes(quality)) {
     throw createRequestError('不支援此影片品質設定。');
   }
-  if (![motion, captionStrength].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
+  if (![motion, captionStrength].every((item) => Number.isFinite(item) && item >= 0 && item <= 100)) {
     throw createRequestError('運鏡與文字強度必須介於 0 至 100。');
   }
+  return { duration, fps, resolution, quality, motion, captionStrength };
+}
+
+function validateProjectTags(payload) {
+  return {
+    client: readOptionalText(payload, 'client', '客戶名稱', MAX_TAG_LENGTH),
+    project: readOptionalText(payload, 'project', '專案名稱', MAX_TAG_LENGTH),
+  };
+}
+
+function validateInferencePayload(payload) {
+  if (!isPlainObject(payload)) {
+    throw createRequestError('推論工作資料格式錯誤。');
+  }
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
+  const story = typeof payload.story === 'string' ? payload.story.trim() : '';
+  if ((!prompt && !story) || prompt.length > 5_000 || story.length > 5_000) {
+    throw createRequestError('提示詞與影片描述至少填一項，且不可超過 5,000 字。');
+  }
+  if (payload.sourceImageDataUrl && (
+    typeof payload.sourceImageDataUrl !== 'string'
+    || payload.sourceImageDataUrl.length > 28 * 1024 * 1024
+  )) {
+    throw createRequestError('來源圖片資料格式錯誤或超過 20 MB。', 413);
+  }
+  const negativePrompt = readOptionalText(payload, 'negativePrompt', '負面提示詞', 5_000);
+  const hasSeed = payload.seed !== undefined && payload.seed !== null && payload.seed !== '';
+  const seed = hasSeed ? validateSeed(payload.seed) : generateSeed();
+  const presetId = readOptionalText(payload, 'presetId', '預設 ID', 100);
+  if (presetId && !UUID_PATTERN.test(presetId)) throw createRequestError('預設 ID 無效。');
   return {
     prompt,
     story,
     negativePrompt,
     seed,
     seedMode: hasSeed ? 'fixed' : 'random',
+    ...validateProjectTags(payload),
+    presetId,
     moduleId: typeof payload.moduleId === 'string' ? payload.moduleId.slice(0, 100) : '',
-    videoModelId: videoModel?.id || VIDEO_MODEL_CATALOG[0].id,
+    videoModelId: validateVideoModelId(payload.videoModelId) || VIDEO_MODEL_CATALOG[0].id,
     sourceImageDataUrl: payload.sourceImageDataUrl || '',
-    settings: { duration, fps, resolution, quality, motion, captionStrength },
+    settings: validateGenerationSettings(payload.settings),
+  };
+}
+
+function extractTemplateVariables(...templates) {
+  const names = new Set();
+  for (const template of templates) {
+    for (const match of String(template || '').matchAll(/(?<!\{)\{([\p{L}\p{N}_]{1,40})\}(?!\})/gu)) {
+      names.add(match[1]);
+    }
+  }
+  return [...names];
+}
+
+function validatePresetPayload(payload) {
+  if (!isPlainObject(payload)) throw createRequestError('預設資料格式錯誤。');
+  const name = readOptionalText(payload, 'name', '預設名稱', MAX_TAG_LENGTH);
+  if (!name) throw createRequestError('預設名稱不可為空。');
+  const seedMode = payload.seedMode ?? 'random';
+  if (!['random', 'fixed'].includes(seedMode)) throw createRequestError('seed 模式僅支援 random 或 fixed。');
+  if (seedMode === 'fixed' && (payload.seed === undefined || payload.seed === null || payload.seed === '')) {
+    throw createRequestError('固定 seed 模式需要提供 seed。');
+  }
+  return {
+    name,
+    ...validateProjectTags(payload),
+    description: readOptionalText(payload, 'description', '預設說明', 1_000),
+    promptTemplate: readOptionalText(payload, 'promptTemplate', '提示詞範本', 5_000),
+    storyTemplate: readOptionalText(payload, 'storyTemplate', '影片描述範本', 5_000),
+    negativePrompt: readOptionalText(payload, 'negativePrompt', '負面提示詞', 5_000),
+    moduleId: readOptionalText(payload, 'moduleId', '生成模組', 100),
+    videoModelId: validateVideoModelId(payload.videoModelId),
+    seedMode,
+    seed: seedMode === 'fixed' ? validateSeed(payload.seed) : null,
+    settings: validateGenerationSettings(payload.settings),
   };
 }
 
@@ -727,6 +802,8 @@ async function collectVideoItems(outputDir) {
 
 function createApp(options = {}) {
   let outputDir = normalizeOutputDir(options.outputDir || DEFAULT_OUTPUT_DIR);
+  const dataDir = normalizeOutputDir(options.dataDir || DEFAULT_DATA_DIR);
+  const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
   const renameLocks = new Map();
   const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
@@ -1050,6 +1127,9 @@ function createApp(options = {}) {
         seed: job.seed,
         videoModelId: job.videoModelId,
         workflowSha256: job.workflowSha256,
+        client: job.client || '',
+        project: job.project || '',
+        presetId: job.presetId || '',
         duration: Number(job.settings.duration) || 0,
         fps: Number(job.settings.fps) || 24,
         resolution,
@@ -1295,6 +1375,9 @@ function createApp(options = {}) {
       negativePrompt: inference.negativePrompt,
       seed: inference.seed,
       seedMode: inference.seedMode,
+      client: inference.client,
+      project: inference.project,
+      presetId: inference.presetId,
       moduleId: inference.moduleId,
       videoModelId: inference.videoModelId,
       settings: inference.settings,
@@ -1387,6 +1470,135 @@ function createApp(options = {}) {
     }
   }
 
+  function getPresetPath(presetId) {
+    if (typeof presetId !== 'string' || !UUID_PATTERN.test(presetId)) {
+      throw createRequestError('找不到參數預設。', 404);
+    }
+    return path.join(presetsDir, `${presetId}.json`);
+  }
+
+  function toPresetResponse(preset) {
+    return { ...preset, variables: extractTemplateVariables(preset.promptTemplate, preset.storyTemplate) };
+  }
+
+  async function writePreset(preset) {
+    await fs.mkdir(presetsDir, { recursive: true });
+    const presetPath = getPresetPath(preset.id);
+    const temporaryPath = `${presetPath}.${crypto.randomUUID()}.tmp`;
+    await fs.writeFile(temporaryPath, JSON.stringify(preset, null, 2));
+    await fs.rename(temporaryPath, presetPath);
+  }
+
+  async function readPreset(presetId) {
+    const text = await fs.readFile(getPresetPath(presetId), 'utf8').catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (text === null) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw createRequestError('參數預設檔案已損毀。', 500);
+    }
+  }
+
+  async function listPresets() {
+    const entries = await fs.readdir(presetsDir, { withFileTypes: true }).catch((error) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    const presets = [];
+    for (const entry of entries) {
+      const match = /^(.+)\.json$/u.exec(entry.name);
+      if (!entry.isFile() || !match || !UUID_PATTERN.test(match[1])) continue;
+      try {
+        const preset = JSON.parse(await fs.readFile(path.join(presetsDir, entry.name), 'utf8'));
+        if (preset?.id === match[1]) presets.push(preset);
+      } catch {
+        continue;
+      }
+    }
+    const collator = new Intl.Collator('zh-Hant');
+    presets.sort((left, right) => (
+      collator.compare(left.client || '', right.client || '')
+      || collator.compare(left.project || '', right.project || '')
+      || collator.compare(left.name || '', right.name || '')
+    ));
+    return presets;
+  }
+
+  async function createPreset(payload) {
+    const now = new Date().toISOString();
+    const preset = {
+      schemaVersion: PRESET_SCHEMA_VERSION,
+      id: crypto.randomUUID(),
+      ...validatePresetPayload(payload),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await writePreset(preset);
+    return toPresetResponse(preset);
+  }
+
+  async function updatePreset(presetId, payload) {
+    const existing = await readPreset(presetId);
+    if (!existing) throw createRequestError('找不到參數預設。', 404);
+    const preset = {
+      schemaVersion: PRESET_SCHEMA_VERSION,
+      id: existing.id,
+      ...validatePresetPayload(payload),
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await writePreset(preset);
+    return toPresetResponse(preset);
+  }
+
+  async function deletePreset(presetId) {
+    const presetPath = getPresetPath(presetId);
+    if (!(await fileExists(presetPath))) throw createRequestError('找不到參數預設。', 404);
+    await fs.rm(presetPath, { force: true });
+    return { ok: true };
+  }
+
+  async function exportPresets() {
+    return {
+      schemaVersion: PRESET_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      presets: await listPresets(),
+    };
+  }
+
+  async function importPresets(payload) {
+    if (!isPlainObject(payload) || !Array.isArray(payload.presets)) {
+      throw createRequestError('匯入資料需要 presets 陣列。');
+    }
+    if (payload.presets.length > MAX_PRESETS_PER_IMPORT) {
+      throw createRequestError(`單次最多匯入 ${MAX_PRESETS_PER_IMPORT} 筆預設。`, 413);
+    }
+    const now = new Date().toISOString();
+    // Validate every entry before writing so a bad file never half-imports.
+    const presets = payload.presets.map((entry, index) => {
+      try {
+        const fields = validatePresetPayload(entry);
+        const createdAt = typeof entry.createdAt === 'string' && !Number.isNaN(Date.parse(entry.createdAt))
+          ? entry.createdAt
+          : now;
+        return {
+          schemaVersion: PRESET_SCHEMA_VERSION,
+          id: typeof entry.id === 'string' && UUID_PATTERN.test(entry.id) ? entry.id : crypto.randomUUID(),
+          ...fields,
+          createdAt,
+          updatedAt: now,
+        };
+      } catch (error) {
+        throw createRequestError(`第 ${index + 1} 筆預設無效：${error.message}`, error.statusCode || 400);
+      }
+    });
+    for (const preset of presets) await writePreset(preset);
+    return { imported: presets.length, presets: presets.map(toPresetResponse) };
+  }
+
   async function rerunInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const original = jobs.find((item) => item.id === jobId);
@@ -1434,6 +1646,9 @@ function createApp(options = {}) {
       negativePrompt: original.negativePrompt || '',
       seed: original.seed,
       seedMode: 'fixed',
+      client: original.client || '',
+      project: original.project || '',
+      presetId: original.presetId || '',
       moduleId: original.moduleId,
       videoModelId: original.videoModelId,
       settings: original.settings,
@@ -1470,6 +1685,7 @@ function createApp(options = {}) {
       return sendJson(response, 200, {
         backendAvailable: true,
         outputDir,
+        presetsDir,
         storageMode: 'backend',
         localGpuPreferred: true,
       });
@@ -1502,6 +1718,30 @@ function createApp(options = {}) {
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {
       const body = await readJsonBody(request);
       return sendJson(response, 201, await createInferenceJob(body));
+    }
+
+    if (requestUrl.pathname === '/api/presets' && request.method === 'GET') {
+      return sendJson(response, 200, (await listPresets()).map(toPresetResponse));
+    }
+
+    if (requestUrl.pathname === '/api/presets' && request.method === 'POST') {
+      return sendJson(response, 201, await createPreset(await readJsonBody(request)));
+    }
+
+    if (requestUrl.pathname === '/api/presets/export' && request.method === 'GET') {
+      return sendJson(response, 200, await exportPresets());
+    }
+
+    if (requestUrl.pathname === '/api/presets/import' && request.method === 'POST') {
+      return sendJson(response, 200, await importPresets(await readJsonBody(request)));
+    }
+
+    const presetMatch = /^\/api\/presets\/([^/]+)$/u.exec(requestUrl.pathname);
+    if (presetMatch && request.method === 'PUT') {
+      return sendJson(response, 200, await updatePreset(decodeURIComponent(presetMatch[1]), await readJsonBody(request)));
+    }
+    if (presetMatch && request.method === 'DELETE') {
+      return sendJson(response, 200, await deletePreset(decodeURIComponent(presetMatch[1])));
     }
 
     const rerunJobMatch = /^\/api\/inference\/jobs\/([^/]+)\/rerun$/u.exec(requestUrl.pathname);

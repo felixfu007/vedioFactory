@@ -8,6 +8,7 @@ services:
       PORT: 8000
       VEDIO_FACTORY_OUTPUT_DIR: /data/output
       VEDIO_FACTORY_MODEL_DIR: /data/models
+      VEDIO_FACTORY_DATA_DIR: /data/app
       VEDIO_FACTORY_COMFYUI_URL: http://host.docker.internal:8188
       VEDIO_FACTORY_COMFYUI_WORKFLOW: ${VEDIO_FACTORY_COMFYUI_WORKFLOW:-}
     extra_hosts:
@@ -15,8 +16,10 @@ services:
     volumes:
       - vediofactory-output:/data/output
       - vediofactory-models:/data/models
+      - vediofactory-app:/data/app
       - ./workflows:/workflows:ro
 
 volumes:
   vediofactory-output:
   vediofactory-models:
+  vediofactory-app:
