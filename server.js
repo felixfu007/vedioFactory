@@ -1373,18 +1373,39 @@ function createApp(options = {}) {
     return jobs;
   }
 
+  async function refreshJobOnce(job) {
+    if (!inferenceRefreshes.has(job.id)) {
+      inferenceRefreshes.set(job.id, refreshComfyInferenceJob(job));
+    }
+    try {
+      return await inferenceRefreshes.get(job.id);
+    } finally {
+      inferenceRefreshes.delete(job.id);
+    }
+  }
+
   async function getInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const job = jobs.find((item) => item.id === jobId) || null;
     if (!job?.comfyPromptId) return job;
-    if (!inferenceRefreshes.has(jobId)) {
-      inferenceRefreshes.set(jobId, refreshComfyInferenceJob(job));
+    return refreshJobOnce(job);
+  }
+
+  async function listInferenceJobSummaries({ refresh = false, limit = Infinity } = {}) {
+    const jobs = (await listInferenceJobs()).slice(0, limit);
+    const summaries = [];
+    for (const job of jobs) {
+      if (!refresh || !job.comfyPromptId || !['queued', 'running'].includes(job.status)) {
+        summaries.push(summarizeJob(job));
+        continue;
+      }
+      try {
+        summaries.push(summarizeJob(await refreshJobOnce(job)));
+      } catch (error) {
+        summaries.push({ ...summarizeJob(job), refreshError: error.message });
+      }
     }
-    try {
-      return await inferenceRefreshes.get(jobId);
-    } finally {
-      inferenceRefreshes.delete(jobId);
-    }
+    return summaries;
   }
 
   async function cancelInferenceJob(jobId) {
@@ -2023,7 +2044,11 @@ function createApp(options = {}) {
     }
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'GET') {
-      return sendJson(response, 200, await listInferenceJobs());
+      const limit = Number(requestUrl.searchParams.get('limit') || 500);
+      return sendJson(response, 200, await listInferenceJobSummaries({
+        refresh: requestUrl.searchParams.get('refresh') === '1',
+        limit: Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 500) : 500,
+      }));
     }
 
     if (requestUrl.pathname === '/api/inference/batches' && request.method === 'POST') {

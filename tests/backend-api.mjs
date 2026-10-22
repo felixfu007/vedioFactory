@@ -754,6 +754,12 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       assert.equal(queuedJob.status, 'queued');
 
       comfyRunning = true;
+      const refreshedJobs = await fetch(`${comfyAppOrigin}/api/inference/jobs?refresh=1`).then((response) => response.json());
+      const refreshedComfyJob = refreshedJobs.find((job) => job.id === comfyJob.id);
+      assert.equal(refreshedComfyJob.status, 'running');
+      assert.equal(refreshedComfyJob.hasWorkflowSnapshot, true);
+      assert.equal('submittedWorkflow' in refreshedComfyJob, false);
+      assert.equal((await fetch(`${comfyAppOrigin}/api/inference/jobs?limit=1`).then((response) => response.json())).length, 1);
       const runningJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(runningJob.status, 'running');
       const runningCancelResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/cancel`, {

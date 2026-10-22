@@ -184,6 +184,57 @@ textarea {
   color: var(--text);
 }
 
+.table-scroll {
+  overflow-x: auto;
+}
+
+.jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.jobs-table th,
+.jobs-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(151, 171, 196, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.jobs-table th {
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.jobs-table td.prompt-cell {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+
+.jobs-table .row-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.jobs-table .row-actions button {
+  padding: 0.45rem 0.8rem;
+}
+
+.job-status {
+  white-space: nowrap;
+}
+
+.job-status[data-status="failed"] {
+  color: #ffc5cf;
+}
+
+.job-status[data-status="succeeded"] {
+  color: var(--primary-strong);
+}
+
 .library-filters {
   margin-bottom: 1rem;
 }
