@@ -146,6 +146,31 @@ textarea {
   gap: 0.9rem;
 }
 
+.presets-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.presets-card .section-header {
+  margin-bottom: 0;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.library-filters {
+  margin-bottom: 1rem;
+}
+
 .primary {
   background: linear-gradient(135deg, var(--primary), #7f78ff);
   color: white;
@@ -273,6 +298,7 @@ textarea {
 
 @media (max-width: 640px) {
   .parameter-grid,
+  .preset-grid,
   .actions,
   .stats,
   .inline-actions {

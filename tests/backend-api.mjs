@@ -26,6 +26,7 @@ async function main() {
     port: 0,
     host: '127.0.0.1',
     outputDir: managedOutputDir,
+    dataDir: path.join(managedOutputDir, 'app-data'),
     maxVideoUploadBytes: 1024,
   });
   const address = app.server.address();
@@ -331,6 +332,102 @@ async function main() {
     const missingRerunResponse = await fetch(`${origin}/api/inference/jobs/not-found/rerun`, { method: 'POST' });
     assert.equal(missingRerunResponse.status, 404);
 
+    // Parameter presets: CRUD, validation, export/import round trip.
+    const presetsDir = path.join(managedOutputDir, 'app-data', 'presets');
+    assert.equal(config.presetsDir, presetsDir);
+    const postJson = (url, payload, method = 'POST') => fetch(`${origin}${url}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.deepEqual(await fetch(`${origin}/api/presets`).then((response) => response.json()), []);
+    const presetPayload = {
+      name: 'IG 直式 9:16',
+      client: '客戶A',
+      project: '春季活動',
+      description: '春季活動社群短片',
+      promptTemplate: '展示 {product}，畫面結尾出現 {slogan}',
+      storyTemplate: '{product} 從遠景推近',
+      negativePrompt: 'blurry, watermark',
+      moduleId: 'cinematic-motion',
+      videoModelId: 'wan-2.1-t2v-1.3b',
+      seedMode: 'fixed',
+      seed: 7,
+      settings: { duration: 6, fps: 24, resolution: '720x1280', quality: 'premium', motion: 40, captionStrength: 50 },
+    };
+    for (const [invalidPreset, pattern] of [
+      [{ ...presetPayload, name: '  ' }, /名稱/],
+      [{ ...presetPayload, seed: undefined }, /seed/],
+      [{ ...presetPayload, seedMode: 'sometimes' }, /seed 模式/],
+      [{ ...presetPayload, videoModelId: 'not-a-model' }, /影片模型/],
+      [{ ...presetPayload, settings: { ...presetPayload.settings, fps: 60 } }, /FPS/],
+      [{ ...presetPayload, client: 'x'.repeat(101) }, /客戶名稱/],
+    ]) {
+      const invalidPresetResponse = await postJson('/api/presets', invalidPreset);
+      assert.equal(invalidPresetResponse.status, 400);
+      assert.match((await invalidPresetResponse.json()).error, pattern);
+    }
+    const createdPresetResponse = await postJson('/api/presets', presetPayload);
+    assert.equal(createdPresetResponse.status, 201);
+    const createdPreset = await createdPresetResponse.json();
+    assert.match(createdPreset.id, /^[\da-f-]{36}$/u);
+    assert.deepEqual(createdPreset.variables, ['product', 'slogan']);
+    assert.equal(createdPreset.seed, 7);
+    assert.equal(createdPreset.settings.resolution, '720x1280');
+    assert.equal(JSON.parse(await fs.readFile(path.join(presetsDir, `${createdPreset.id}.json`), 'utf8')).name, 'IG 直式 9:16');
+    await postJson('/api/presets', { ...presetPayload, name: '通用橫式', project: '', seedMode: 'random', seed: 99 });
+    await postJson('/api/presets', { ...presetPayload, name: 'B 預設', client: '客戶B' });
+    await fs.writeFile(path.join(presetsDir, 'broken.json'), '{');
+    await fs.writeFile(path.join(presetsDir, '00000000-0000-0000-0000-000000000000.json'), '{');
+    const listedPresets = await fetch(`${origin}/api/presets`).then((response) => response.json());
+    assert.deepEqual(listedPresets.map((preset) => preset.name), ['通用橫式', 'IG 直式 9:16', 'B 預設']);
+    assert.equal(listedPresets[0].seed, null);
+
+    const updatedPresetResponse = await postJson(`/api/presets/${createdPreset.id}`, { ...presetPayload, name: 'IG 直式 v2' }, 'PUT');
+    assert.equal(updatedPresetResponse.status, 200);
+    const updatedPreset = await updatedPresetResponse.json();
+    assert.equal(updatedPreset.name, 'IG 直式 v2');
+    assert.equal(updatedPreset.id, createdPreset.id);
+    assert.equal(updatedPreset.createdAt, createdPreset.createdAt);
+    assert.equal((await postJson('/api/presets/0f0f0f0f-0000-4000-8000-000000000000', presetPayload, 'PUT')).status, 404);
+    assert.equal((await postJson('/api/presets/..%2F..%2Fconfig', presetPayload, 'PUT')).status, 404);
+
+    const exportedPresets = await fetch(`${origin}/api/presets/export`).then((response) => response.json());
+    assert.equal(exportedPresets.schemaVersion, 1);
+    assert.equal(exportedPresets.presets.length, 3);
+    for (const preset of exportedPresets.presets) {
+      const deletedPresetResponse = await fetch(`${origin}/api/presets/${preset.id}`, { method: 'DELETE' });
+      assert.equal(deletedPresetResponse.status, 200);
+    }
+    assert.equal((await fetch(`${origin}/api/presets/${createdPreset.id}`, { method: 'DELETE' })).status, 404);
+    assert.equal((await fetch(`${origin}/api/presets`).then((response) => response.json())).length, 0);
+
+    const partialImportResponse = await postJson('/api/presets/import', {
+      presets: [exportedPresets.presets[0], { ...presetPayload, name: '' }],
+    });
+    assert.equal(partialImportResponse.status, 400);
+    assert.match((await partialImportResponse.json()).error, /第 2 筆/);
+    assert.equal((await fetch(`${origin}/api/presets`).then((response) => response.json())).length, 0);
+
+    const importResponse = await postJson('/api/presets/import', exportedPresets);
+    assert.equal(importResponse.status, 200);
+    assert.equal((await importResponse.json()).imported, 3);
+    const reimportedPresets = await fetch(`${origin}/api/presets/export`).then((response) => response.json());
+    const withoutUpdatedAt = ({ updatedAt, ...preset }) => preset;
+    assert.deepEqual(reimportedPresets.presets.map(withoutUpdatedAt), exportedPresets.presets.map(withoutUpdatedAt));
+
+    const taggedJob = await postJson('/api/inference/jobs', {
+      prompt: '客戶專案工作',
+      client: '客戶A',
+      project: '春季活動',
+      presetId: createdPreset.id,
+    }).then((response) => response.json());
+    assert.equal(taggedJob.client, '客戶A');
+    assert.equal(taggedJob.project, '春季活動');
+    assert.equal(taggedJob.presetId, createdPreset.id);
+    assert.equal((await postJson('/api/inference/jobs', { prompt: 'bad preset', presetId: '../x' })).status, 400);
+    await fs.rm(taggedJob.manifestPath);
+
     const empty = await fetch(`${origin}/api/videos`).then((response) => response.json());
     assert.equal(empty.length, 0);
 
@@ -408,6 +505,7 @@ async function main() {
       port: 0,
       host: '127.0.0.1',
       outputDir: comfyOutputDir,
+      dataDir: path.join(comfyOutputDir, 'app-data'),
       comfyUIUrl: comfyOrigin,
       comfyUIWorkflowPath: workflowPath,
     });
@@ -439,6 +537,8 @@ async function main() {
         prompt: '本機 ComfyUI 測試',
         negativePrompt: 'blurry, watermark',
         seed: 42,
+        client: '客戶A',
+        project: '春季活動',
         moduleId: 'cinematic-motion',
         videoModelId: 'wan-2.1-t2v-1.3b',
         sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
@@ -493,6 +593,8 @@ async function main() {
       assert.equal(importedVideos[0].negativePrompt, 'blurry, watermark');
       assert.equal(importedVideos[0].workflowSha256, workflowSha256);
       assert.equal(importedVideos[0].inferenceJobId, comfyJob.id);
+      assert.equal(importedVideos[0].client, '客戶A');
+      assert.equal(importedVideos[0].project, '春季活動');
 
       const pendingJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',
