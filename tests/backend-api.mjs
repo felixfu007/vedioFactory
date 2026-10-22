@@ -260,6 +260,43 @@ async function main() {
     }).then((response) => response.json());
     assert.equal(deletedBinary.ok, true);
 
+    // Additional delivery formats: MP4 upload, typed serving, byte ranges, extension-preserving rename.
+    const mp4Item = { ...item, id: 'mp4-upload-id', fileName: 'delivery.mp4' };
+    const mp4Response = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody(mp4Item, Buffer.from('0123456789')),
+    });
+    assert.equal(mp4Response.status, 201);
+    const [listedMp4] = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(listedMp4.fileName, 'delivery.mp4');
+    assert.equal(listedMp4.format, 'mp4');
+    const mp4Get = await fetch(`${origin}/api/videos/delivery.mp4`);
+    assert.equal(mp4Get.headers.get('content-type'), 'video/mp4');
+    assert.equal(mp4Get.headers.get('accept-ranges'), 'bytes');
+    assert.equal(await mp4Get.text(), '0123456789');
+    const rangeGet = await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=2-5' } });
+    assert.equal(rangeGet.status, 206);
+    assert.equal(rangeGet.headers.get('content-range'), 'bytes 2-5/10');
+    assert.equal(await rangeGet.text(), '2345');
+    const suffixRangeGet = await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=-3' } });
+    assert.equal(await suffixRangeGet.text(), '789');
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=20-30' } })).status, 416);
+    const extensionChange = await fetch(`${origin}/api/videos/delivery.mp4`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nextFileName: 'delivery.webm' }),
+    });
+    assert.equal(extensionChange.status, 400);
+    assert.match((await extensionChange.json()).error, /副檔名/);
+    const badExtensionResponse = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody({ ...item, id: 'txt-id', fileName: 'notes.txt' }, Buffer.from('x')),
+    });
+    assert.equal(badExtensionResponse.status, 400);
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4`, { method: 'DELETE' })).status, 200);
+
     const inferenceJob = await fetch(`${origin}/api/inference/jobs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -493,7 +530,11 @@ async function main() {
         response.end(JSON.stringify(comfyFinished ? {
           'comfy-prompt-123': {
             status: { completed: true, status_str: 'success' },
-            outputs: { '4': { videos: [{ filename: 'generated.webm', type: 'output' }] } },
+            outputs: {
+              '4': { videos: [{ filename: 'generated.webm', type: 'output' }] },
+              '6': { gifs: [{ filename: 'generated.mp4', type: 'output', subfolder: '' }] },
+              '7': { images: [{ filename: 'frame.png', type: 'output' }] },
+            },
           },
         } : comfyRunning ? {
           'comfy-prompt-123': { status: { completed: false, status_str: 'running' }, outputs: {} },
@@ -694,11 +735,11 @@ async function main() {
       comfyFinished = true;
       const completedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(completedJob.status, 'succeeded', JSON.stringify(completedJob));
-      assert.equal(completedJob.outputs.length, 1);
+      assert.equal(completedJob.outputs.length, 2);
       assert.equal(await fs.readFile(path.join(comfyOutputDir, completedJob.outputs[0].fileName), 'utf8'), 'fake-comfy-webm');
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
-      assert.equal(importedVideos.length, 1);
-      assert.match(importedVideos[0].fileName, /\.webm$/u);
+      assert.equal(importedVideos.length, 2);
+      assert.deepEqual(importedVideos.map((video) => video.format).sort(), ['mp4', 'webm']);
       assert.equal(importedVideos[0].seed, 42);
       assert.equal(importedVideos[0].negativePrompt, 'blurry, watermark');
       assert.equal(importedVideos[0].workflowSha256, workflowSha256);

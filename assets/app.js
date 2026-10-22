@@ -34,6 +34,12 @@
   };
 
   const storageKey = 'vedioFactory.library';
+  const videoExtensionPattern = /\.(webm|mp4|gif|webp)$/iu;
+  const animatedImageFormats = new Set(['gif', 'webp']);
+
+  function getItemFormat(item) {
+    return (item.format || videoExtensionPattern.exec(item.fileName || '')?.[1] || 'webm').toLowerCase();
+  }
 
   const ui = {};
 
@@ -669,7 +675,7 @@
 
     const nextLibrary = [];
     for await (const [entryName, entry] of state.folderHandle.entries()) {
-      if (entry.kind !== 'file' || !entryName.endsWith('.webm.json')) continue;
+      if (entry.kind !== 'file' || !videoExtensionPattern.test(entryName.replace(/\.json$/u, ''))) continue;
       try {
         const file = await entry.getFile();
         const metadata = JSON.parse(await file.text());
@@ -753,7 +759,19 @@
 
       card.dataset.itemId = item.id;
       card.dataset.fileName = item.fileName;
-      video.src = item.previewUrl ?? '';
+      const format = getItemFormat(item);
+      if (animatedImageFormats.has(format)) {
+        const image = document.createElement('img');
+        image.className = 'video-preview';
+        image.alt = item.fileName;
+        image.src = item.previewUrl ?? '';
+        video.replaceWith(image);
+        const clipButton = card.querySelector('[data-action="clip"]');
+        clipButton.disabled = true;
+        clipButton.title = `${format.toUpperCase()} 無法在瀏覽器內剪輯`;
+      } else {
+        video.src = item.previewUrl ?? '';
+      }
       title.textContent = item.fileName;
       subtitle.textContent = `${item.moduleName} ・ ${new Date(item.createdAt).toLocaleString('zh-TW')}`;
       summary.textContent = item.story || item.prompt || '由照片與風格模組共同生成。';
@@ -763,6 +781,7 @@
 
       [
         ['長度', `${item.duration}s`],
+        ['格式', getItemFormat(item).toUpperCase()],
         ['畫質', item.quality],
         ['解析度', item.resolution],
         ['來源', item.sourceImageDataUrl ? '照片 + 提示詞' : '純文字描述'],
@@ -1492,14 +1511,15 @@
 
   async function renameItem(item) {
     try {
-      const requested = window.prompt('請輸入新的檔名', item.fileName.replace(/\.webm$/u, ''));
+      const extension = `.${getItemFormat(item)}`;
+      const requested = window.prompt('請輸入新的檔名', item.fileName.replace(videoExtensionPattern, ''));
       if (!requested) return;
-      const normalizedName = requested.trim().replace(/\.webm$/u, '');
+      const normalizedName = requested.trim().replace(videoExtensionPattern, '');
       if (!normalizedName) {
         setStatus('請輸入有效的檔名。');
         return;
       }
-      const nextFileName = `${normalizedName}.webm`;
+      const nextFileName = `${normalizedName}${extension}`;
       const updated = {
         ...item,
         fileName: nextFileName,

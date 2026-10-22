@@ -2,7 +2,7 @@ const http = require('node:http');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
-const { createWriteStream } = require('node:fs');
+const { createReadStream, createWriteStream } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Readable, Transform } = require('node:stream');
@@ -321,7 +321,13 @@ const contentTypes = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
 };
+
+const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.gif', '.webp'];
+const VIDEO_EXTENSION_PATTERN = /\.(webm|mp4|gif|webp)$/iu;
 
 function createRequestError(message, statusCode = 400) {
   const error = new Error(message);
@@ -374,8 +380,8 @@ function sanitizeFileName(fileName) {
   }
 
   const normalized = path.basename(fileName.trim()).replace(/[\\/]+/g, '');
-  if (!normalized.endsWith('.webm')) {
-    throw createRequestError('影片檔名必須以 .webm 結尾。');
+  if (!VIDEO_EXTENSIONS.includes(path.extname(normalized).toLowerCase()) || normalized.length <= 5) {
+    throw createRequestError(`影片檔名必須以 ${VIDEO_EXTENSIONS.join('、')} 結尾。`);
   }
 
   return normalized;
@@ -754,7 +760,7 @@ async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig(), work
     guidance: [
       '請在本機啟動 ComfyUI；Docker 部署時使用 host.docker.internal，並透過防火牆限制存取。',
       '將 ComfyUI 匯出的 API 格式工作流 JSON 放入 workflows 資料夾（可附同名 .vf.json 設定檔），或設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。',
-      `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 .webm 影片會複製到 ${outputDir}。`,
+      `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 WebM/MP4/GIF/WebP 影片會複製到 ${outputDir}。`,
     ],
   };
 }
@@ -802,7 +808,7 @@ async function collectVideoItems(outputDir) {
   const items = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.webm.json')) continue;
+    if (!entry.isFile() || !VIDEO_EXTENSION_PATTERN.test(entry.name.replace(/\.json$/u, ''))) continue;
     try {
       const metadataPath = path.join(outputDir, entry.name);
       const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
@@ -813,6 +819,7 @@ async function collectVideoItems(outputDir) {
       items.push({
         ...metadata,
         fileName,
+        format: path.extname(fileName).slice(1).toLowerCase(),
         fileSize: stats.size,
         previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
       });
@@ -1046,15 +1053,15 @@ function createApp(options = {}) {
       warnings.push('所選模型以圖生影片為主，但工作流沒有 {{source_image}}；請確認它確實支援目前的輸入方式。');
     }
 
-    const videoOutputNodes = nodeSummaries.filter(({ classType }) => /video|webm/iu.test(classType));
+    const videoOutputNodes = nodeSummaries.filter(({ classType }) => /video|webm|animated|gif|mp4/iu.test(classType));
     if (!videoOutputNodes.length) {
-      warnings.push('找不到名稱含 video/webm 的節點，請確認工作流有影片輸出節點。');
+      warnings.push('找不到名稱含 video/webm/animated/gif 的節點，請確認工作流有影片輸出節點。');
     } else {
       const outputText = videoOutputNodes
-        .map(({ id }) => JSON.stringify(workflow[id].inputs))
+        .map(({ id }) => `${workflow[id].class_type} ${JSON.stringify(workflow[id].inputs)}`)
         .join(' ');
-      if (!/webm/iu.test(outputText) && !videoOutputNodes.some(({ classType }) => /webm/iu.test(classType))) {
-        warnings.push('無法從輸出節點設定確認 WebM 格式；目前只有 WebM 會匯入影片庫。');
+      if (!/webm|mp4|h26[45]|gif|webp/iu.test(outputText)) {
+        warnings.push('無法從輸出節點設定確認輸出格式；只有 WebM、MP4、GIF、WebP 會匯入影片庫。');
       }
     }
 
@@ -1189,7 +1196,7 @@ function createApp(options = {}) {
       if (Array.isArray(value)) {
         value.forEach(visit);
       } else if (value && typeof value === 'object') {
-        if (typeof value.filename === 'string' && /\.webm$/iu.test(value.filename)) videos.push(value);
+        if (typeof value.filename === 'string' && VIDEO_EXTENSION_PATTERN.test(value.filename)) videos.push(value);
         Object.values(value).forEach(visit);
       }
     };
@@ -1209,7 +1216,8 @@ function createApp(options = {}) {
       const response = await requestComfyUI(`/view?${query}`, {
         signal: AbortSignal.timeout(120_000),
       });
-      const fileName = sanitizeFileName(`comfyui-${job.id.slice(0, 8)}-${index + 1}.webm`);
+      const extension = path.extname(video.filename).toLowerCase();
+      const fileName = sanitizeFileName(`comfyui-${job.id.slice(0, 8)}-${index + 1}${extension}`);
       const videoPath = path.join(outputDir, fileName);
       const temporaryPath = `${videoPath}.${crypto.randomUUID()}.tmp`;
       let stats;
@@ -1296,7 +1304,7 @@ function createApp(options = {}) {
           job.outputs = await saveComfyVideoOutputs(job, historyEntry);
           job.status = 'succeeded';
           if (!job.outputs.length) {
-            job.guidance = 'ComfyUI 工作已完成，但未找到 .webm 輸出；請確認工作流使用影片輸出節點並輸出 WebM。';
+            job.guidance = 'ComfyUI 工作已完成，但未找到 WebM/MP4/GIF/WebP 輸出；請確認工作流使用影片輸出節點。';
           }
         }
       } else {
@@ -1574,7 +1582,7 @@ function createApp(options = {}) {
       job.comfyPromptId = submission.prompt_id;
       job.queuePosition = submission.number;
       job.status = 'queued';
-      job.guidance = '已提交至本機 ComfyUI。請確認工作流輸出 .webm，完成後影片會匯入專案資料夾。';
+      job.guidance = '已提交至本機 ComfyUI。完成後 WebM/MP4/GIF/WebP 輸出會匯入專案資料夾。';
     }
 
     await persistInferenceJob(job);
@@ -1960,18 +1968,41 @@ function createApp(options = {}) {
         if (!(await fileExists(videoPath))) {
           return sendText(response, 404, 'Not found');
         }
-        const headers = { 'content-type': 'video/webm' };
+        const { size } = await fs.stat(videoPath);
+        const headers = { 'content-type': getContentType(videoPath), 'accept-ranges': 'bytes' };
         if (requestUrl.searchParams.get('download') === '1') {
-          headers['content-disposition'] = `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+          const asciiName = fileName.replace(/[^\x20-\x7e]|"/gu, '_');
+          headers['content-disposition'] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
         }
-        response.writeHead(200, headers);
-        response.end(await fs.readFile(videoPath));
+        const range = /^bytes=(\d*)-(\d*)$/u.exec(request.headers.range || '');
+        let start = 0;
+        let end = size - 1;
+        if (range && (range[1] || range[2])) {
+          start = range[1] ? Number(range[1]) : Math.max(size - Number(range[2]), 0);
+          end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start > end || start >= size) {
+            response.writeHead(416, { 'content-range': `bytes */${size}` });
+            response.end();
+            return;
+          }
+          headers['content-range'] = `bytes ${start}-${end}/${size}`;
+        }
+        headers['content-length'] = String(Math.max(end - start + 1, 0));
+        response.writeHead(range && (range[1] || range[2]) ? 206 : 200, headers);
+        if (size === 0) {
+          response.end();
+          return;
+        }
+        await pipeline(createReadStream(videoPath, { start, end }), response);
         return;
       }
 
       if (request.method === 'PATCH') {
         const body = await readJsonBody(request);
         const nextFileName = sanitizeFileName(body.nextFileName);
+        if (path.extname(nextFileName).toLowerCase() !== path.extname(fileName).toLowerCase()) {
+          throw createRequestError('重新命名不可變更影片副檔名。');
+        }
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
         return withRenameLocks([fileName, nextFileName], async () => {

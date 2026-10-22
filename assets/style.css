@@ -250,11 +250,13 @@ textarea {
   background: rgba(6, 16, 28, 0.72);
 }
 
-.video-card video {
+.video-card video,
+.video-card .video-preview {
   width: 100%;
   border-radius: 18px;
   background: black;
   aspect-ratio: 16 / 9;
+  object-fit: contain;
 }
 
 .stats {
