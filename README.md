@@ -111,13 +111,21 @@ npm start
 
 API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 可放在載入圖片節點的圖片欄位：
 
-- `{{prompt}}`、`{{story}}`、`{{negative_prompt}}`
+- `{{prompt}}`、`{{story}}`、`{{negative_prompt}}`、`{{seed}}`
 - `{{model_id}}`
 - `{{width}}`、`{{height}}`、`{{duration}}`、`{{fps}}`
 - `{{quality}}`、`{{motion}}`、`{{caption_strength}}`
 - `{{source_image}}`
 
 按「檢查 ComfyUI 工作流」可在提交前檢查 API 節點結構、未知佔位符、是否選了來源圖片，以及影片/WebM 輸出節點提示。送出工作時也會再次做必要檢查，避免不支援的佔位符或缺少必需來源圖片時先上傳圖片。
+
+### 可重現生成（seed 與工作流快照）
+
+- 「本機 ComfyUI 推論」區可填負面提示詞，並選擇 seed 模式：「每次隨機」會由後端產生 seed 並顯示在狀態列；「固定」則使用輸入的整數（0 至 9007199254740991）。請將 `{{seed}}` 放在 KSampler 等節點的 seed 欄位。
+- 每個工作 manifest（`inference-jobs/*.json`）會記錄所有參數、seed、工作流檔案 SHA-256、實際送給 ComfyUI 的 prompt JSON（`submittedWorkflow`）與可取得時的 ComfyUI 版本。
+- 來源圖片會依內容 SHA-256 保存在 `inference-jobs/sources/`，並以相同內容產生相同檔名上傳 ComfyUI，確保重跑時 prompt JSON 完全一致。
+- 影片庫中由 ComfyUI 產生的影片按「以相同設定重新產出」，會呼叫 `POST /api/inference/jobs/:id/rerun`，以原工作流快照、seed 與來源圖片重新提交。若目前工作流檔案或 ComfyUI 版本已不同，介面會顯示警告。
+- 相同 prompt JSON 只保證送出的輸入一致；模型權重、custom nodes、驅動或非決定性 GPU 運算仍可能讓畫面略有差異。
 
 推論工作在 ComfyUI 尚未開始執行時可從待執行佇列取消。若工作已在執行，介面會拒絕取消：ComfyUI 的 `/interrupt` 會中斷目前全域執行，可能影響其他工作，因此本專案不會自動呼叫它。
 
