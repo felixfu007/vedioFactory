@@ -912,6 +912,60 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       const missingSourceRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
       assert.equal(missingSourceRerun.status, 409);
       assert.match((await missingSourceRerun.json()).error, /來源圖片快照/);
+
+      // Delivery folders: copy videos + source images + manifest, then replay from the manifest.
+      const sourceSnapshotPath = path.join(comfyOutputDir, 'inference-jobs', 'sources', `${sourceImageSha256}.png`);
+      await fs.writeFile(sourceSnapshotPath, 'hello');
+      const postDelivery = (payload) => fetch(`${comfyAppOrigin}/api/deliveries`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const deliveryResponse = await postDelivery({ client: '客戶A', project: '春季活動' });
+      assert.equal(deliveryResponse.status, 201);
+      const delivery = await deliveryResponse.json();
+      assert.equal(delivery.itemCount, 4);
+      assert.ok(delivery.deliveryPath.startsWith(path.join(comfyOutputDir, 'deliveries', '客戶A', '春季活動')));
+      const deliveryManifest = JSON.parse(await fs.readFile(delivery.manifestPath, 'utf8'));
+      assert.equal(deliveryManifest.schemaVersion, 1);
+      assert.equal(deliveryManifest.client, '客戶A');
+      for (const deliveredItem of deliveryManifest.items) {
+        const deliveredBytes = await fs.readFile(path.join(delivery.deliveryPath, deliveredItem.path));
+        assert.equal(deliveredItem.sha256, crypto.createHash('sha256').update(deliveredBytes).digest('hex'));
+        assert.equal(deliveredItem.reproduction.type, 'comfyui');
+        assert.equal(deliveredItem.reproduction.job.seed, 42);
+        assert.equal('manifestPath' in deliveredItem.reproduction.job, false);
+        assert.deepEqual(deliveredItem.reproduction.job.submittedWorkflow, comfyWorkflows[0]);
+      }
+      assert.equal(await fs.readFile(path.join(delivery.deliveryPath, 'sources', `${sourceImageSha256}.png`), 'utf8'), 'hello');
+      await fs.rm(sourceSnapshotPath);
+
+      const postReplay = (payload) => fetch(`${comfyAppOrigin}/api/deliveries/replay`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const replayResponse = await postReplay({ manifestPath: delivery.manifestPath, index: 0 });
+      assert.equal(replayResponse.status, 201);
+      const replayed = await replayResponse.json();
+      assert.equal(replayed.rerunOf, comfyJob.id);
+      assert.equal(replayed.seed, 42);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.equal(await fs.readFile(sourceSnapshotPath, 'utf8'), 'hello');
+
+      const canvasDelivery = await postDelivery({ fileNames: ['fail-me.webm'] }).then((response) => response.json());
+      assert.equal(canvasDelivery.itemCount, 1);
+      assert.ok(canvasDelivery.deliveryPath.includes(path.join('未指定客戶', '未指定專案')));
+      const canvasManifest = JSON.parse(await fs.readFile(canvasDelivery.manifestPath, 'utf8'));
+      assert.equal(canvasManifest.items[0].reproduction.type, 'canvas');
+      assert.equal((await postReplay({ manifestPath: canvasDelivery.manifestPath, index: 0 })).status, 409);
+      assert.equal((await postReplay({ manifestPath: delivery.manifestPath, index: 99 })).status, 404);
+      assert.equal((await postReplay({ manifestPath: path.join(comfyOutputDir, 'manifest.json') })).status, 400);
+      assert.equal((await postReplay({ manifestPath: path.join(comfyOutputDir, 'deliveries', '..', 'manifest.json') })).status, 400);
+      assert.equal((await postDelivery({})).status, 400);
+      assert.equal((await postDelivery({ fileNames: ['nope.webm'] })).status, 404);
+      assert.equal((await postDelivery({ client: '無此客戶' })).status, 404);
+      assert.equal((await postDelivery({ client: 'CON', fileNames: ['fail-me.webm'] })).status, 201);
     } finally {
       await new Promise((resolve) => comfyApp.server.close(resolve));
       await new Promise((resolve) => comfyServer.close(resolve));

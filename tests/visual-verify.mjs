@@ -295,6 +295,15 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
     const filterOptions = await page.$$eval('#libraryProjectFilter option', (options) => options.map((option) => option.value));
     assert.deepEqual(filterOptions, ['', '春季活動']);
 
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.click('#createDeliveryButton');
+    await page.waitForFunction(() => document.querySelector('#deliveryStatus').textContent.includes('已建立交付資料夾（1 部影片）'));
+    const deliveryRoot = path.join(managedOutputDir, 'deliveries', '客戶A', '春季活動');
+    const [deliveryFolder] = await fs.readdir(deliveryRoot);
+    const deliveryManifest = JSON.parse(await fs.readFile(path.join(deliveryRoot, deliveryFolder, 'manifest.json'), 'utf8'));
+    assert.equal(deliveryManifest.items[0].fileName, stored.fileName);
+    assert.equal(deliveryManifest.items[0].reproduction.type, 'canvas');
+
     const pageScreenshotPath = path.join(outputDir, 'preset-page.png');
     await page.screenshot({ path: pageScreenshotPath, fullPage: true });
     return { presetId: preset.id, applied, pageScreenshotPath };

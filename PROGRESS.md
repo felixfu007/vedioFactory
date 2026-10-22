@@ -33,18 +33,19 @@
 
 PR #7（以 main 為基底；#5、#6 已由使用者合併）。
 
-### 第 8 項：交付格式、批次與工作佇列（分支 `feature/delivery-batch-queue`，基於 `feature/multi-workflow`）— 進行中
+### 第 8 項：交付格式、批次與工作佇列（分支 `feature/delivery-batch-queue`，基於 `feature/multi-workflow`／PR #7）
 
-決策（2026-10-22）：交付包＝匯出成資料夾 `<outputDir>/deliveries/<客戶>/<專案>/<時間戳>/`；MP4＝匯入 ComfyUI 的 MP4/GIF/WebP，加上偵測到 ffmpeg 時可選轉檔。
+決策（2026-10-22）：交付包＝匯出成資料夾；MP4＝匯入 ComfyUI 的 MP4/GIF/WebP，加上偵測到 ffmpeg 時可選轉檔。
 
-子步驟（每步完成就 commit）：
-- [x] 8a 多格式：`.webm/.mp4/.gif/.webp` 檔名、列表、播放（gif/webp 用 `<img>`）、改名保留副檔名、ComfyUI 匯入多格式、預檢警告文字。
-- [x] 8b ffmpeg：偵測（`VEDIO_FACTORY_FFMPEG` 或 PATH；測試用 `options.ffmpegCommand=[node, fake.mjs]`）、`POST /api/videos/:name/transcode` 轉 MP4（yuv420p、偶數尺寸、faststart），一次一個。
-- [x] 8c 批次：`POST /api/inference/batches`（prompts × seeds/seedCount，≤50），逐筆建立，單筆失敗不影響其他，工作帶 `batchId`。
-- [x] 8d 佇列面板：`GET /api/inference/jobs?refresh=1` 更新進行中工作；列表回應移除 `submittedWorkflow`；前端面板顯示狀態／取消／重跑。
-- [ ] 8e 交付資料夾：`POST /api/deliveries`（依客戶/專案或檔名）複製影片＋來源圖＋`manifest.json`（含完整工作 manifest）；`POST /api/deliveries/replay` 用交付 manifest 重新產出（重用 rerun 邏輯）。
+- [x] 8a 多格式：`.webm/.mp4/.gif/.webp`、影片串流支援 Range、改名保留副檔名、GIF/WebP 以圖片預覽。
+- [x] 8b ffmpeg：`/api/config` 回報 ffmpeg；`POST /api/videos/:name/transcode`（H.264/AAC、一次一個、失敗清理）。
+- [x] 8c 批次：`POST /api/inference/batches`（prompts × seeds，≤50，單筆失敗隔離，`batchId`/`batchIndex`）。
+- [x] 8d 佇列面板：`GET /api/inference/jobs?refresh=1&limit=`（摘要、不含 prompt JSON 快照）；前端狀態篩選、取消、重跑、自動更新。
+- [x] 8e 交付資料夾：`POST /api/deliveries`、`POST /api/deliveries/replay`；資料夾名稱保留中文並避開 Windows 保留字。
+- 另修正：手機寬度（390px）頁面橫向溢出（`.layout`/卡片 `min-width: 0`、長路徑換行、`library-grid` 最小欄寬）；佇列表格在自身容器內橫向捲動。
+- 測試：`npm run test:all` 通過。
 
 ## 下一步
 
-- 完成第 8 項子步驟 8a–8e。
+- 第 9 項：輸入邊界、測試與結構整理（拆分 server.js / app.js、風格模組改為檔案載入）。
 - 注意：執行 visual 測試前需 `npm ci`，並需本機 Chrome/Edge。

@@ -109,6 +109,27 @@ textarea {
   align-content: start;
 }
 
+/* Long local paths (output folder, delivery folder) must wrap instead of widening the page. */
+.layout > *,
+.hero > *,
+.controls-grid > * {
+  min-width: 0;
+}
+
+.hero-status strong,
+.status-text,
+.hint,
+.video-card,
+.catalog-card {
+  overflow-wrap: anywhere;
+}
+
+.video-card,
+.catalog-card,
+.catalog-card > * {
+  min-width: 0;
+}
+
 .status-label,
 .eyebrow {
   color: var(--primary-strong);
@@ -190,6 +211,7 @@ textarea {
 
 .jobs-table {
   width: 100%;
+  min-width: 860px;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
@@ -209,6 +231,7 @@ textarea {
 }
 
 .jobs-table td.prompt-cell {
+  min-width: 200px;
   max-width: 280px;
   overflow-wrap: anywhere;
 }
@@ -283,7 +306,7 @@ textarea {
 .library-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
 }
 
 .catalog-card {

@@ -124,6 +124,13 @@ npm start
 
 預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
 
+## 批次、工作佇列與交付資料夾
+
+- **批次生成**：「本機 ComfyUI 推論」區展開「批次生成」，每行輸入一個提示詞（留空則用上方提示詞），並設定每個提示詞產生幾個 seed。固定 seed 時依序使用 seed、seed+1…；隨機時每個工作各自產生 seed。單一批次最多 50 個工作，單筆失敗不影響其他工作（`POST /api/inference/batches`）。
+- **工作佇列**：「推論工作佇列」區列出所有工作的狀態、客戶／專案、seed、工作流與批次，可依狀態篩選、取消排隊中的工作，或以相同設定重跑；有進行中工作時每 4 秒自動更新，完成後影片庫會自動重新整理。
+- **交付資料夾**：在影片庫篩選客戶／專案後按「為目前篩選建立交付資料夾」，會建立 `輸出資料夾\deliveries\<客戶>\<專案>\<時間>\`，內含 `videos\`（影片副本）、`sources\`（ComfyUI 來源圖片）與 `manifest.json`（每部影片的 SHA-256、完整參數，以及 ComfyUI 工作的工作流快照與 seed）。
+- **從交付資料夾重新產出**：把交付資料夾放回（或保留在）`輸出資料夾\deliveries\` 底下，呼叫 `POST /api/deliveries/replay`，body 為 `{"manifestPath": "<manifest.json 絕對路徑>", "index": 0}`，即可用 manifest 中保存的工作流快照、seed 與來源圖片重新提交 ComfyUI。Canvas 影片的參數同樣記錄在 manifest，但需在影片庫中重新產出。
+
 ## 多工作流與參數規格
 
 把 ComfyUI 匯出的 **API 格式** JSON 放進 `workflows\` 資料夾（或 `VEDIO_FACTORY_WORKFLOWS_DIR`），就會出現在「本機 ComfyUI 推論」區的工作流選單，不需重啟。可在旁邊放同名的 `.vf.json` 設定檔（選用），描述名稱、適用模型與參數限制：
