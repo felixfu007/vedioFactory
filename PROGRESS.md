@@ -45,6 +45,15 @@ PR #7（以 main 為基底；#5、#6 已由使用者合併）。
 - 另修正：手機寬度（390px）頁面橫向溢出（`.layout`/卡片 `min-width: 0`、長路徑換行、`library-grid` 最小欄寬）；佇列表格在自身容器內橫向捲動。
 - 測試：`npm run test:all` 通過。
 
+PR #8（疊在 #7 上）。
+
+### 第 9 項：輸入邊界、測試與結構整理 — 進行中
+
+- 決策（2026-10-22）：拆分 server.js / app.js 要等 #7、#8 合併後再做；前端拆檔採瀏覽器原生 ES modules（`<script type="module">`）。
+- 等待期間先做不搬移程式碼的部分（分支 `feature/request-guards`，基於 `feature/delivery-batch-queue`）：
+  - [x] Host 標頭檢查（防 DNS rebinding）＋ 跨來源 Origin 拒絕非 GET 請求（防 CSRF）；`VEDIO_FACTORY_ALLOWED_HOSTS` 可加入區網主機名稱。
+  - [ ] 補充其餘輸入驗證與測試。
+
 ## 下一步
 
 - 第 9 項：輸入邊界、測試與結構整理（拆分 server.js / app.js、風格模組改為檔案載入）。

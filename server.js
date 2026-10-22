@@ -330,6 +330,8 @@ const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.gif', '.webp'];
 const DEFAULT_FFMPEG_COMMAND = [process.env.VEDIO_FACTORY_FFMPEG || 'ffmpeg'];
 const FFMPEG_DETECTION_TTL_MS = 30_000;
 const MAX_BATCH_JOBS = 50;
+const LOOPBACK_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]'];
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const DELIVERIES_DIR_NAME = 'deliveries';
 const DELIVERY_SCHEMA_VERSION = 1;
 const MAX_DELIVERY_ITEMS = 500;
@@ -411,6 +413,18 @@ async function hashFile(filePath) {
   const hash = crypto.createHash('sha256');
   await pipeline(createReadStream(filePath), hash);
   return hash.digest('hex');
+}
+
+function parseHostList(value) {
+  return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+function readHostname(hostHeader) {
+  try {
+    return new URL(`http://${hostHeader}`).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 function sanitizePathSegment(value, fallback = 'item') {
@@ -865,6 +879,10 @@ function createApp(options = {}) {
   const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
   // [command, ...prefixArgs] so tests can substitute a script run by node.
   const ffmpegCommand = options.ffmpegCommand || DEFAULT_FFMPEG_COMMAND;
+  const allowedHostnames = new Set([
+    ...LOOPBACK_HOSTNAMES,
+    ...(options.allowedHosts ?? parseHostList(process.env.VEDIO_FACTORY_ALLOWED_HOSTS)),
+  ]);
   let ffmpegDetection = null;
   let transcodeQueue = Promise.resolve();
   const renameLocks = new Map();
@@ -2409,8 +2427,33 @@ function createApp(options = {}) {
     }
   }
 
+  // The API has no login, so only accept requests addressed to an allowed host name
+  // (blocks DNS rebinding) and refuse state-changing requests from other origins (blocks CSRF).
+  function guardRequest(request) {
+    const hostHeader = String(request.headers.host || '').toLowerCase();
+    const hostname = readHostname(hostHeader);
+    if (!allowedHostnames.has(hostname)) {
+      throw createRequestError(
+        `不允許的 Host：${hostname || '（空白）'}。若需從其他主機名稱存取，請設定 VEDIO_FACTORY_ALLOWED_HOSTS。`,
+        403,
+      );
+    }
+    const { origin } = request.headers;
+    if (SAFE_METHODS.has(request.method) || origin === undefined) return;
+    let originHost = '';
+    try {
+      originHost = new URL(origin).host.toLowerCase();
+    } catch {
+      originHost = '';
+    }
+    if (originHost !== hostHeader) {
+      throw createRequestError('拒絕跨來源請求。', 403);
+    }
+  }
+
   const server = http.createServer(async (request, response) => {
     try {
+      guardRequest(request);
       const requestUrl = new URL(request.url, `http://${request.headers.host || `${HOST}:${PORT}`}`);
       if (requestUrl.pathname.startsWith('/api/')) {
         const handled = await handleApi(request, response, requestUrl);

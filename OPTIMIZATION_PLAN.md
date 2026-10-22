@@ -17,7 +17,7 @@
 ### 3. 強化本機 API 的輸入與存取邊界
 
 - 驗證影片 metadata、推論工作欄位及請求大小，避免錯誤資料寫入磁碟。
-- 確認服務綁定非 localhost 時的使用情境，再決定是否加入存取控制；預設維持 localhost 綁定。
+- [x] 確認服務綁定非 localhost 時的使用情境，再決定是否加入存取控制；預設維持 localhost 綁定。（已加入 Host 檢查防 DNS rebinding、跨來源寫入拒絕防 CSRF；區網存取以 `VEDIO_FACTORY_ALLOWED_HOSTS` 明確開放。）
 - 驗收：非法輸入被明確拒絕，既有管理 API 行為保持相容。
 
 ### 4. 接入真正的本機 GPU 推論（ComfyUI）

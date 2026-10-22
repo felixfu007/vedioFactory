@@ -13,6 +13,18 @@ const { startServer } = require('../server.js');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
+function rawRequest(url, { method = 'GET', headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, { method, headers }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+}
+
 function createVideoUploadBody(metadata, videoBytes) {
   const metadataBytes = Buffer.from(JSON.stringify(metadata));
   const metadataLength = Buffer.alloc(4);
@@ -50,8 +62,14 @@ async function main() {
       host: '127.0.0.1',
       outputDir: managedOutputDir,
       comfyUIUrl: 'http://host.docker.internal:8188',
+      allowedHosts: ['studio.local'],
     });
     try {
+      const lanPort = dockerHostApp.server.address().port;
+      const lanHealth = await rawRequest(`http://127.0.0.1:${lanPort}/api/health`, { headers: { host: `studio.local:${lanPort}` } });
+      assert.equal(lanHealth.status, 200);
+      const otherLanHost = await rawRequest(`http://127.0.0.1:${lanPort}/api/health`, { headers: { host: `other.local:${lanPort}` } });
+      assert.equal(otherLanHost.status, 403);
       const dockerHostRuntime = await fetch(
         `http://127.0.0.1:${dockerHostApp.server.address().port}/api/inference/runtime`,
       ).then((response) => response.json());
@@ -59,6 +77,41 @@ async function main() {
     } finally {
       await new Promise((resolve, reject) => dockerHostApp.server.close((error) => error ? reject(error) : resolve()));
     }
+    // Request guards: DNS-rebinding Host check and cross-origin write rejection.
+    const port = address.port;
+    const reboundHost = await rawRequest(`${origin}/api/config`, { headers: { host: `attacker.example:${port}` } });
+    assert.equal(reboundHost.status, 403);
+    assert.match(JSON.parse(reboundHost.body).error, /VEDIO_FACTORY_ALLOWED_HOSTS/);
+    assert.equal((await rawRequest(`${origin}/`, { headers: { host: `attacker.example:${port}` } })).status, 403);
+    assert.equal((await rawRequest(`${origin}/api/health`, { headers: { host: `localhost:${port}` } })).status, 200);
+    const crossOriginWrite = await rawRequest(`${origin}/api/config/output-dir`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', origin: 'http://attacker.example' },
+      body: JSON.stringify({ outputDir: path.join(managedOutputDir, 'hijacked') }),
+    });
+    assert.equal(crossOriginWrite.status, 403);
+    assert.equal((await fetch(`${origin}/api/config`).then((response) => response.json())).outputDir, managedOutputDir);
+    const nullOriginWrite = await rawRequest(`${origin}/api/presets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'null' },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    assert.equal(nullOriginWrite.status, 403);
+    const otherPortWrite = await rawRequest(`${origin}/api/presets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port + 1}` },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    assert.equal(otherPortWrite.status, 403);
+    const crossOriginRead = await rawRequest(`${origin}/api/health`, { headers: { origin: 'http://attacker.example' } });
+    assert.equal(crossOriginRead.status, 200);
+    const sameOriginWrite = await rawRequest(`${origin}/api/inference/workflow-check`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin },
+      body: '{}',
+    });
+    assert.equal(sameOriginWrite.status, 200);
+
     const unconfiguredWorkflow = await fetch(`${origin}/api/inference/workflow-check`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

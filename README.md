@@ -73,6 +73,10 @@ docker compose up --build -d
 
 網站埠只綁定主機的 `127.0.0.1`。若要更改主機埠，例如 8080，先設定 `$env:VEDIO_FACTORY_PORT="8080"` 再執行 Compose。Docker 部署不會替 ComfyUI 安裝模型、節點或 GPU 執行環境。
 
+### 存取保護
+
+vedioFactory 沒有登入機制，因此後端只接受以 `localhost`、`127.0.0.1` 或 `[::1]` 連線的請求，可防止 DNS rebinding；也會拒絕從其他網站送來的寫入請求（POST／PUT／PATCH／DELETE，依 `Origin` 判斷），可防止 CSRF。若要讓區網其他電腦連線，除了把 `HOST` 設為 `0.0.0.0`，還要把它們使用的主機名稱或 IP 加入 `VEDIO_FACTORY_ALLOWED_HOSTS`。請注意：區網中任何能連到此埠的人都能管理影片與工作，只應在可信任的網路使用。
+
 ## Windows 11 使用方式
 
 1. 上傳照片（可選）
@@ -101,6 +105,7 @@ docker compose up --build -d
 | `VEDIO_FACTORY_FFMPEG` | `ffmpeg`（PATH） | 選用：ffmpeg 執行檔路徑，用於「轉成 MP4」 |
 | `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
+| `VEDIO_FACTORY_ALLOWED_HOSTS` | 空值 | 選用：逗號分隔的額外主機名稱（例如 `studio.local,192.168.1.20`），允許以這些名稱連線 |
 | `PORT` | `8000` | 服務埠號 |
 
 ### PowerShell 範例
