@@ -56,5 +56,9 @@ PR #8（疊在 #7 上）。
 
 ## 下一步
 
-- 第 9 項：輸入邊界、測試與結構整理（拆分 server.js / app.js、風格模組改為檔案載入）。
-- 注意：執行 visual 測試前需 `npm ci`，並需本機 Chrome/Edge。
+- 等待使用者合併 PR #7 → #8 → #9（依序疊加）。合併後從 main 開新分支做第 9 項剩餘部分：
+  1. 拆分 `server.js`：路由、影片庫、ComfyUI/工作、預設、工作流/規格、交付、驗證等模組（CommonJS），行為不變、測試不改。
+  2. 拆分 `assets/app.js`：改為原生 ES modules（`<script type="module">`），風格模組改為 `assets/modules/*.js` 載入，`window.VedioFactory.registerModule` 保持相容。
+  3. 補充競態／大檔／資源釋放測試。
+- 未完成：第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收（需使用者在有 ComfyUI 與模型的機器上執行）。
+- 注意：visual 測試需 `npm ci` 與本機 Chrome/Edge。
