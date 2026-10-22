@@ -14,6 +14,7 @@
     backend: {
       available: false,
       outputDir: '',
+      ffmpeg: { available: false, version: '' },
     },
     inference: {
       runtime: null,
@@ -801,6 +802,9 @@
       card.querySelector('[data-action="rename"]').addEventListener('click', () => renameItem(item));
       card.querySelector('[data-action="clip"]').addEventListener('click', () => clipItem(item, Number(startInput.value), Number(endInput.value)));
       card.querySelector('[data-action="regenerate"]').addEventListener('click', () => regenerateItem(item));
+      const transcodeButton = card.querySelector('[data-action="transcode"]');
+      transcodeButton.hidden = !state.backend.available || !state.backend.ffmpeg.available || format === 'mp4';
+      transcodeButton.addEventListener('click', () => transcodeItem(item, transcodeButton));
       card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteItem(item));
 
       ui.libraryGrid.append(fragment);
@@ -972,6 +976,7 @@
       const payload = await fetchJson('/api/config', { headers: {} });
       state.backend.available = true;
       state.backend.outputDir = payload.outputDir;
+      state.backend.ffmpeg = payload.ffmpeg || { available: false, version: '' };
       state.folderHandle = null;
       await listFolderItems();
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
@@ -1506,6 +1511,21 @@
     } catch (error) {
       console.error(error);
       setStatus(`下載失敗：${error.message}`);
+    }
+  }
+
+  async function transcodeItem(item, button) {
+    button.disabled = true;
+    setStatus(`正在以 ffmpeg 將 ${item.fileName} 轉成 MP4…`);
+    try {
+      const transcoded = await fetchJson(`/api/videos/${encodeURIComponent(item.fileName)}/transcode`, { method: 'POST' });
+      await listFolderItems();
+      renderLibrary();
+      setStatus(`已轉成 MP4：${transcoded.fileName}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`轉檔失敗：${error.message}`);
+      button.disabled = false;
     }
   }
 

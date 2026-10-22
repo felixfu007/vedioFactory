@@ -327,6 +327,8 @@ const contentTypes = {
 };
 
 const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.gif', '.webp'];
+const DEFAULT_FFMPEG_COMMAND = [process.env.VEDIO_FACTORY_FFMPEG || 'ffmpeg'];
+const FFMPEG_DETECTION_TTL_MS = 30_000;
 const VIDEO_EXTENSION_PATTERN = /\.(webm|mp4|gif|webp)$/iu;
 
 function createRequestError(message, statusCode = 400) {
@@ -339,6 +341,7 @@ function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(command, args, options, (error, stdout, stderr) => {
       if (error) {
+        error.stderr = stderr;
         reject(error);
         return;
       }
@@ -837,6 +840,10 @@ function createApp(options = {}) {
   const dataDir = normalizeOutputDir(options.dataDir || DEFAULT_DATA_DIR);
   const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
   const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
+  // [command, ...prefixArgs] so tests can substitute a script run by node.
+  const ffmpegCommand = options.ffmpegCommand || DEFAULT_FFMPEG_COMMAND;
+  let ffmpegDetection = null;
+  let transcodeQueue = Promise.resolve();
   const renameLocks = new Map();
   const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
@@ -1750,6 +1757,80 @@ function createApp(options = {}) {
     return { imported: presets.length, presets: presets.map(toPresetResponse) };
   }
 
+  function runFfmpeg(args, execOptions = {}) {
+    return execFileAsync(ffmpegCommand[0], [...ffmpegCommand.slice(1), ...args], {
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+      ...execOptions,
+    });
+  }
+
+  async function detectFfmpeg() {
+    if (!ffmpegDetection || Date.now() - ffmpegDetection.checkedAt > FFMPEG_DETECTION_TTL_MS) {
+      const result = await runFfmpeg(['-hide_banner', '-version'], { timeout: 5_000 }).then(
+        ({ stdout }) => ({ available: true, version: stdout.split(/\r?\n/u)[0].trim().slice(0, 200) }),
+        () => ({ available: false, version: '' }),
+      );
+      ffmpegDetection = { ...result, checkedAt: Date.now() };
+    }
+    return { available: ffmpegDetection.available, version: ffmpegDetection.version };
+  }
+
+  async function transcodeVideoToMp4(fileName) {
+    const source = sanitizeFileName(fileName);
+    const sourcePath = path.join(outputDir, source);
+    const sourceMetadataPath = `${sourcePath}.json`;
+    if (!(await fileExists(sourcePath)) || !(await fileExists(sourceMetadataPath))) {
+      throw createRequestError('找不到要轉檔的影片。', 404);
+    }
+    if (path.extname(source).toLowerCase() === '.mp4') throw createRequestError('影片已是 MP4。', 409);
+    if (!(await detectFfmpeg()).available) {
+      throw createRequestError('找不到 ffmpeg：請安裝 ffmpeg 並加入 PATH，或設定 VEDIO_FACTORY_FFMPEG。', 503);
+    }
+
+    // One transcode at a time keeps CPU/GPU free for inference.
+    const run = transcodeQueue.then(async () => {
+      const baseName = source.slice(0, -path.extname(source).length);
+      let targetName = sanitizeFileName(`${baseName}.mp4`);
+      for (let suffix = 1; await fileExists(path.join(outputDir, targetName)); suffix += 1) {
+        targetName = sanitizeFileName(`${baseName}-${suffix}.mp4`);
+      }
+      const targetPath = path.join(outputDir, targetName);
+      const temporaryPath = path.join(outputDir, `.${crypto.randomUUID()}.transcode`);
+      try {
+        await runFfmpeg([
+          '-hide_banner', '-loglevel', 'error', '-y',
+          '-i', sourcePath,
+          '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'medium',
+          '-c:a', 'aac', '-b:a', '192k',
+          '-movflags', '+faststart',
+          '-f', 'mp4', temporaryPath,
+        ], { timeout: 30 * 60_000 });
+        await fs.rename(temporaryPath, targetPath);
+      } catch (error) {
+        await fs.rm(temporaryPath, { force: true });
+        const details = String(error.stderr || error.message || '').trim().slice(0, 1_000);
+        throw createRequestError(`ffmpeg 轉檔失敗：${details || '未知錯誤'}`, 500);
+      }
+      const metadata = JSON.parse(await fs.readFile(sourceMetadataPath, 'utf8'));
+      const transcoded = {
+        ...metadata,
+        id: crypto.randomUUID(),
+        fileName: targetName,
+        format: 'mp4',
+        transcodedFrom: source,
+        createdAt: new Date().toISOString(),
+      };
+      delete transcoded.updatedAt;
+      await fs.writeFile(`${targetPath}.json`, JSON.stringify(transcoded, null, 2));
+      const stats = await fs.stat(targetPath);
+      return { ...transcoded, fileSize: stats.size, previewUrl: `/api/videos/${encodeURIComponent(targetName)}` };
+    });
+    transcodeQueue = run.catch(() => undefined);
+    return run;
+  }
+
   async function rerunInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const original = jobs.find((item) => item.id === jobId);
@@ -1841,6 +1922,7 @@ function createApp(options = {}) {
         backendAvailable: true,
         outputDir,
         presetsDir,
+        ffmpeg: await detectFfmpeg(),
         storageMode: 'backend',
         localGpuPreferred: true,
       });
@@ -1956,6 +2038,11 @@ function createApp(options = {}) {
         throw new Error('缺少影片資料。');
       }
       return sendJson(response, 201, await saveVideoAsset(body.item, body.videoBase64));
+    }
+
+    const transcodeMatch = /^\/api\/videos\/([^/]+)\/transcode$/u.exec(requestUrl.pathname);
+    if (transcodeMatch && request.method === 'POST') {
+      return sendJson(response, 201, await transcodeVideoToMp4(decodeURIComponent(transcodeMatch[1])));
     }
 
     if (requestUrl.pathname.startsWith('/api/videos/')) {

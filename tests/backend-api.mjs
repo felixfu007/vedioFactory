@@ -28,6 +28,7 @@ async function main() {
     outputDir: managedOutputDir,
     dataDir: path.join(managedOutputDir, 'app-data'),
     workflowsDir: path.join(managedOutputDir, 'no-workflows'),
+    ffmpegCommand: [path.join(managedOutputDir, 'missing-ffmpeg.exe')],
     maxVideoUploadBytes: 1024,
   });
   const address = app.server.address();
@@ -36,6 +37,7 @@ async function main() {
   try {
     const config = await fetch(`${origin}/api/config`).then((response) => response.json());
     assert.equal(config.backendAvailable, true);
+    assert.deepEqual(config.ffmpeg, { available: false, version: '' });
     assert.equal(config.outputDir, managedOutputDir);
 
     const runtime = await fetch(`${origin}/api/inference/runtime`).then((response) => response.json());
@@ -295,6 +297,17 @@ async function main() {
       body: createVideoUploadBody({ ...item, id: 'txt-id', fileName: 'notes.txt' }, Buffer.from('x')),
     });
     assert.equal(badExtensionResponse.status, 400);
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4/transcode`, { method: 'POST' })).status, 409);
+    await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody({ ...item, id: 'no-ffmpeg-id', fileName: 'no-ffmpeg.webm' }, Buffer.from('x')),
+    });
+    const noFfmpegResponse = await fetch(`${origin}/api/videos/no-ffmpeg.webm/transcode`, { method: 'POST' });
+    assert.equal(noFfmpegResponse.status, 503);
+    assert.match((await noFfmpegResponse.json()).error, /ffmpeg/);
+    assert.equal((await fetch(`${origin}/api/videos/missing.webm/transcode`, { method: 'POST' })).status, 404);
+    await fetch(`${origin}/api/videos/no-ffmpeg.webm`, { method: 'DELETE' });
     assert.equal((await fetch(`${origin}/api/videos/delivery.mp4`, { method: 'DELETE' })).status, 200);
 
     const inferenceJob = await fetch(`${origin}/api/inference/jobs`, {
@@ -553,6 +566,21 @@ async function main() {
     const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
+    const fakeFfmpegPath = path.join(comfyOutputDir, 'fake-ffmpeg.mjs');
+    await fs.writeFile(fakeFfmpegPath, `
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+if (args.includes('-version')) {
+  console.log('ffmpeg version 9.9-fake');
+  process.exit(0);
+}
+const input = args[args.indexOf('-i') + 1];
+if (input.includes('fail')) {
+  console.error('fake encoder failure');
+  process.exit(1);
+}
+fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
+`);
     const workflowsDir = path.join(comfyOutputDir, 'workflows');
     await fs.mkdir(workflowsDir);
     await fs.writeFile(path.join(workflowsDir, 'wan-t2v.json'), JSON.stringify({
@@ -596,6 +624,7 @@ async function main() {
       outputDir: comfyOutputDir,
       dataDir: path.join(comfyOutputDir, 'app-data'),
       workflowsDir,
+      ffmpegCommand: [process.execPath, fakeFfmpegPath],
       comfyUIUrl: comfyOrigin,
       comfyUIWorkflowPath: workflowPath,
     });
@@ -746,6 +775,33 @@ async function main() {
       assert.equal(importedVideos[0].inferenceJobId, comfyJob.id);
       assert.equal(importedVideos[0].client, '客戶A');
       assert.equal(importedVideos[0].project, '春季活動');
+
+      const comfyConfig = await fetch(`${comfyAppOrigin}/api/config`).then((response) => response.json());
+      assert.deepEqual(comfyConfig.ffmpeg, { available: true, version: 'ffmpeg version 9.9-fake' });
+      const importedWebm = importedVideos.find((video) => video.format === 'webm');
+      const transcodeResponse = await fetch(`${comfyAppOrigin}/api/videos/${importedWebm.fileName}/transcode`, { method: 'POST' });
+      assert.equal(transcodeResponse.status, 201);
+      const transcoded = await transcodeResponse.json();
+      assert.equal(transcoded.fileName, importedWebm.fileName.replace(/\.webm$/u, '.mp4'));
+      assert.equal(transcoded.format, 'mp4');
+      assert.equal(transcoded.transcodedFrom, importedWebm.fileName);
+      assert.equal(transcoded.seed, 42);
+      assert.notEqual(transcoded.id, importedWebm.id);
+      assert.equal(await fs.readFile(path.join(comfyOutputDir, transcoded.fileName), 'utf8'), 'MP4:fake-comfy-webm');
+      const transcodedAgain = await fetch(`${comfyAppOrigin}/api/videos/${importedWebm.fileName}/transcode`, { method: 'POST' })
+        .then((response) => response.json());
+      assert.equal(transcodedAgain.fileName, importedWebm.fileName.replace(/\.webm$/u, '-1.mp4'));
+      await fetch(`${comfyAppOrigin}/api/videos`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: createVideoUploadBody({ id: 'fail-id', fileName: 'fail-me.webm', createdAt: new Date().toISOString() }, Buffer.from('x')),
+      });
+      const failedTranscode = await fetch(`${comfyAppOrigin}/api/videos/fail-me.webm/transcode`, { method: 'POST' });
+      assert.equal(failedTranscode.status, 500);
+      assert.match((await failedTranscode.json()).error, /fake encoder failure/);
+      const filesAfterFailure = await fs.readdir(comfyOutputDir);
+      assert.equal(filesAfterFailure.includes('fail-me.mp4'), false);
+      assert.equal(filesAfterFailure.some((name) => name.endsWith('.transcode')), false);
 
       const pendingJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',

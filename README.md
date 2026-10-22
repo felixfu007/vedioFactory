@@ -82,7 +82,12 @@ docker compose up --build -d
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
-後端影片庫會以二進位串流保存 WebM，單檔上限為 500 MiB；中斷或超限的上傳不會保留暫存影片。
+後端影片庫會以二進位串流保存影片，單檔上限為 500 MiB；中斷或超限的上傳不會保留暫存影片。
+
+### 影片格式與 MP4 轉檔
+
+- 影片庫支援 WebM、MP4、GIF、WebP。Canvas 模組產生 WebM；ComfyUI 輸出的這四種格式都會匯入（PNG 等單張圖片不會）。GIF／WebP 以圖片預覽，無法在瀏覽器內剪輯。
+- 若本機可執行 ffmpeg（在 PATH 中，或以 `VEDIO_FACTORY_FFMPEG` 指定路徑），非 MP4 影片卡片會出現「轉成 MP4」：以 H.264（yuv420p、CRF 18）＋ AAC 輸出，並保留原影片的參數 metadata（含 seed、客戶／專案）。轉檔一次執行一個。Windows 可從 https://ffmpeg.org/download.html 下載。Docker 映像預設不含 ffmpeg。
 
 ## 環境變數
 
@@ -93,6 +98,7 @@ docker compose up --build -d
 | `VEDIO_FACTORY_DATA_DIR` | `%USERPROFILE%\vedioFactory` | 應用資料目錄；參數預設存於其下的 `presets/` |
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
 | `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | 選用：額外指定一個預設工作流 JSON 的絕對路徑 |
+| `VEDIO_FACTORY_FFMPEG` | `ffmpeg`（PATH） | 選用：ffmpeg 執行檔路徑，用於「轉成 MP4」 |
 | `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `PORT` | `8000` | 服務埠號 |
