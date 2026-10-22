@@ -329,6 +329,8 @@ const contentTypes = {
 const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.gif', '.webp'];
 const DEFAULT_FFMPEG_COMMAND = [process.env.VEDIO_FACTORY_FFMPEG || 'ffmpeg'];
 const FFMPEG_DETECTION_TTL_MS = 30_000;
+const MAX_BATCH_JOBS = 50;
+const MAX_BATCH_SEED_COUNT = 10;
 const VIDEO_EXTENSION_PATTERN = /\.(webm|mp4|gif|webp)$/iu;
 
 function createRequestError(message, statusCode = 400) {
@@ -1501,7 +1503,65 @@ function createApp(options = {}) {
     }
   }
 
-  async function createInferenceJob(payload) {
+  function summarizeJob(job) {
+    const { submittedWorkflow, workflowPreflight, ...summary } = job;
+    return { ...summary, hasWorkflowSnapshot: Boolean(submittedWorkflow) };
+  }
+
+  async function createInferenceBatch(payload) {
+    if (!isPlainObject(payload)) throw createRequestError('批次資料格式錯誤。');
+    const { prompts: rawPrompts, seeds: rawSeeds, seedCount: rawSeedCount, ...basePayload } = payload;
+    if (rawPrompts !== undefined && (!Array.isArray(rawPrompts) || rawPrompts.some((item) => typeof item !== 'string'))) {
+      throw createRequestError('prompts 必須是字串陣列。');
+    }
+    const cleanedPrompts = (rawPrompts || []).map((item) => item.trim()).filter(Boolean);
+    const prompts = cleanedPrompts.length ? cleanedPrompts : [typeof basePayload.prompt === 'string' ? basePayload.prompt : ''];
+
+    let seeds;
+    if (rawSeeds !== undefined) {
+      if (!Array.isArray(rawSeeds) || !rawSeeds.length || rawSeeds.length > MAX_BATCH_SEED_COUNT) {
+        throw createRequestError(`seeds 必須是 1 至 ${MAX_BATCH_SEED_COUNT} 個 seed 的陣列。`);
+      }
+      seeds = rawSeeds.map(validateSeed);
+    } else {
+      const seedCount = rawSeedCount === undefined ? 1 : Number(rawSeedCount);
+      if (!Number.isInteger(seedCount) || seedCount < 1 || seedCount > MAX_BATCH_SEED_COUNT) {
+        throw createRequestError(`seedCount 必須介於 1 至 ${MAX_BATCH_SEED_COUNT}。`);
+      }
+      const hasBaseSeed = basePayload.seed !== undefined && basePayload.seed !== null && basePayload.seed !== '';
+      // A fixed base seed expands to seed, seed+1, …; otherwise every job draws its own random seed.
+      seeds = Array.from({ length: seedCount }, (_, index) => (
+        hasBaseSeed ? validateSeed(validateSeed(basePayload.seed) + index) : undefined
+      ));
+    }
+    const total = prompts.length * seeds.length;
+    if (total > MAX_BATCH_JOBS) {
+      throw createRequestError(`批次最多 ${MAX_BATCH_JOBS} 個工作（目前 ${prompts.length} 個提示詞 × ${seeds.length} 個 seed）。`);
+    }
+
+    const batchId = crypto.randomUUID();
+    const jobs = [];
+    const errors = [];
+    let batchIndex = 0;
+    for (const prompt of prompts) {
+      for (const seed of seeds) {
+        const index = batchIndex;
+        batchIndex += 1;
+        try {
+          const job = await createInferenceJob({ ...basePayload, prompt, seed }, { batchId, batchIndex: index });
+          jobs.push(summarizeJob(job));
+        } catch (error) {
+          errors.push({ index, prompt, seed: seed ?? null, statusCode: error.statusCode || 500, error: error.message });
+        }
+      }
+    }
+    if (!jobs.length) {
+      throw createRequestError(`批次中所有工作都建立失敗：${errors[0]?.error || '未知錯誤'}`, errors[0]?.statusCode || 400);
+    }
+    return { batchId, total, created: jobs.length, jobs, errors };
+  }
+
+  async function createInferenceJob(payload, batch = null) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
 
@@ -1524,6 +1584,7 @@ function createApp(options = {}) {
       client: inference.client,
       project: inference.project,
       presetId: inference.presetId,
+      ...(batch ? { batchId: batch.batchId, batchIndex: batch.batchIndex } : {}),
       moduleId: inference.moduleId,
       videoModelId: inference.videoModelId,
       settings: inference.settings,
@@ -1963,6 +2024,10 @@ function createApp(options = {}) {
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'GET') {
       return sendJson(response, 200, await listInferenceJobs());
+    }
+
+    if (requestUrl.pathname === '/api/inference/batches' && request.method === 'POST') {
+      return sendJson(response, 201, await createInferenceBatch(await readJsonBody(request)));
     }
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {

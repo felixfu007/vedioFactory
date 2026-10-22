@@ -116,6 +116,9 @@
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
     ui.cancelInferenceButton = document.querySelector('#cancelInferenceButton');
+    ui.batchPromptsInput = document.querySelector('#batchPromptsInput');
+    ui.batchSeedCountInput = document.querySelector('#batchSeedCountInput');
+    ui.queueBatchButton = document.querySelector('#queueBatchButton');
     ui.workflowCheckButton = document.querySelector('#workflowCheckButton');
     ui.workflowCheckStatus = document.querySelector('#workflowCheckStatus');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
@@ -1325,23 +1328,24 @@
     return job;
   }
 
-  async function queueInferenceJob() {
+  // Shared by single and batch submission: gathers the form and runs the workflow preflight.
+  async function prepareInferenceRequest({ hasBatchPrompts = false } = {}) {
+    if (!state.backend.available) {
+      setInferenceStatus('目前未連線到本機後端，無法建立推論工作。');
+      return null;
+    }
+
+    const file = ui.imageInput.files?.[0] ?? null;
+    const sourceImageDataUrl = await readFileAsDataUrl(file);
+    const spec = gatherSpec({ sourceImageDataUrl });
+    if (!spec.prompt && !spec.story && !hasBatchPrompts) {
+      setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
+      return null;
+    }
+    const seed = readSeedSetting();
+
+    ui.workflowCheckButton.disabled = true;
     try {
-      if (!state.backend.available) {
-        setInferenceStatus('目前未連線到本機後端，無法建立推論工作。');
-        return;
-      }
-
-      const file = ui.imageInput.files?.[0] ?? null;
-      const sourceImageDataUrl = await readFileAsDataUrl(file);
-      const spec = gatherSpec({ sourceImageDataUrl });
-      if (!spec.prompt && !spec.story) {
-        setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
-        return;
-      }
-      const seed = readSeedSetting();
-
-      ui.workflowCheckButton.disabled = true;
       const workflowCheck = await fetchJson('/api/inference/workflow-check', {
         method: 'POST',
         body: JSON.stringify({
@@ -1351,43 +1355,82 @@
         }),
       });
       renderWorkflowCheck(workflowCheck);
-      ui.workflowCheckButton.disabled = false;
       if (!workflowCheck.ready) {
         setInferenceStatus(`工作流預檢未通過：${workflowCheck.errors.join(' ')}`);
-        return;
+        return null;
       }
+    } finally {
+      ui.workflowCheckButton.disabled = false;
+    }
+    return {
+      prompt: spec.prompt,
+      story: spec.story,
+      negativePrompt: ui.negativePromptInput.value.trim(),
+      seed,
+      client: spec.client,
+      project: spec.project,
+      presetId: spec.presetId,
+      workflowId: ui.workflowSelect.value,
+      moduleId: spec.moduleId,
+      videoModelId: ui.videoModelSelect.value,
+      sourceImageDataUrl: spec.sourceImageDataUrl,
+      settings: {
+        duration: spec.duration,
+        fps: spec.fps,
+        resolution: spec.resolution,
+        quality: spec.quality,
+        motion: spec.motion,
+        captionStrength: spec.captionStrength,
+      },
+    };
+  }
+
+  async function queueInferenceBatch() {
+    ui.queueBatchButton.disabled = true;
+    try {
+      const prompts = ui.batchPromptsInput.value.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+      const seedCount = Number(ui.batchSeedCountInput.value);
+      if (!Number.isInteger(seedCount) || seedCount < 1 || seedCount > 10) {
+        throw new Error('每個提示詞的 seed 數量必須介於 1 至 10。');
+      }
+      const total = Math.max(prompts.length, 1) * seedCount;
+      if (total > 50) throw new Error(`單一批次最多 50 個工作，目前為 ${total} 個。`);
+      const payload = await prepareInferenceRequest({ hasBatchPrompts: prompts.length > 0 });
+      if (!payload) return;
+      setInferenceStatus(`正在建立 ${total} 個批次工作…`);
+      const result = await fetchJson('/api/inference/batches', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, prompts, seedCount }),
+      });
+      const failures = result.errors.length
+        ? `；${result.errors.length} 個失敗（第一個錯誤：${result.errors[0].error}）`
+        : '';
+      setInferenceStatus(`已建立批次 ${result.batchId.slice(0, 8)}：${result.created}/${result.total} 個工作${failures}`);
+      document.dispatchEvent(new CustomEvent('vediofactory:jobs-changed'));
+    } catch (error) {
+      console.error(error);
+      setInferenceStatus(`建立批次工作失敗：${error.message}`);
+    } finally {
+      ui.queueBatchButton.disabled = false;
+    }
+  }
+
+  async function queueInferenceJob() {
+    try {
+      const payload = await prepareInferenceRequest();
+      if (!payload) return;
 
       const job = await fetchJson('/api/inference/jobs', {
         method: 'POST',
-        body: JSON.stringify({
-          prompt: spec.prompt,
-          story: spec.story,
-          negativePrompt: ui.negativePromptInput.value.trim(),
-          seed,
-          client: spec.client,
-          project: spec.project,
-          presetId: spec.presetId,
-          workflowId: ui.workflowSelect.value,
-          moduleId: spec.moduleId,
-          videoModelId: ui.videoModelSelect.value,
-          sourceImageDataUrl: spec.sourceImageDataUrl,
-          settings: {
-            duration: spec.duration,
-            fps: spec.fps,
-            resolution: spec.resolution,
-            quality: spec.quality,
-            motion: spec.motion,
-            captionStrength: spec.captionStrength,
-          },
-        }),
+        body: JSON.stringify(payload),
       });
 
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${describeInferenceJob(job)}`);
       ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
       if (job.comfyPromptId) startInferenceJobPolling(job);
+      document.dispatchEvent(new CustomEvent('vediofactory:jobs-changed'));
     } catch (error) {
-      ui.workflowCheckButton.disabled = false;
       ui.cancelInferenceButton.hidden = true;
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
@@ -1801,6 +1844,7 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.queueBatchButton.addEventListener('click', queueInferenceBatch);
     ui.cancelInferenceButton.addEventListener('click', cancelInferenceJob);
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);

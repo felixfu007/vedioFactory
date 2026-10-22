@@ -201,6 +201,19 @@
           <p id="workflowCheckStatus" class="status-text">尚未檢查工作流。</p>
           <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
           <button id="cancelInferenceButton" type="button" class="secondary" hidden>取消待執行工作</button>
+          <details class="batch-panel">
+            <summary>批次生成</summary>
+            <label>
+              每行一個提示詞（留空則使用上方提示詞）
+              <textarea id="batchPromptsInput" rows="4" placeholder="新款耳機在城市夜景&#10;新款耳機在海邊日落"></textarea>
+            </label>
+            <label>
+              每個提示詞產生幾個 seed
+              <input id="batchSeedCountInput" type="number" min="1" max="10" step="1" value="2" />
+            </label>
+            <p class="hint">固定 seed 時依序使用 seed、seed+1…；隨機時每個工作各自產生 seed。單一批次最多 50 個工作，單筆失敗不影響其他工作。</p>
+            <button id="queueBatchButton" type="button" class="secondary">建立批次工作</button>
+          </details>
           <p id="inferenceStatus" class="status-text">尚未建立任何推論工作。</p>
         </div>
       </section>

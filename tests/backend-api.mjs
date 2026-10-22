@@ -846,6 +846,44 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       assert.deepEqual(rerunJob.warnings, []);
       assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
 
+      // Batches: prompts x seeds, per-item failures isolated.
+      const postBatch = (payload) => fetch(`${comfyAppOrigin}/api/inference/batches`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const batchBase = { ...reproduciblePayload, prompt: '' };
+      const promptsBeforeBatch = comfyWorkflows.length;
+      const batchResponse = await postBatch({ ...batchBase, prompts: ['批次 A', ' ', '批次 B'], seed: 100, seedCount: 2 });
+      assert.equal(batchResponse.status, 201);
+      const batch = await batchResponse.json();
+      assert.equal(batch.total, 4);
+      assert.equal(batch.created, 4);
+      assert.deepEqual(batch.errors, []);
+      assert.deepEqual(batch.jobs.map((job) => job.seed), [100, 101, 100, 101]);
+      assert.deepEqual(batch.jobs.map((job) => job.batchIndex), [0, 1, 2, 3]);
+      assert.ok(batch.jobs.every((job) => job.batchId === batch.batchId && job.client === '客戶A'));
+      assert.ok(batch.jobs.every((job) => job.hasWorkflowSnapshot && !('submittedWorkflow' in job)));
+      assert.deepEqual(
+        comfyWorkflows.slice(promptsBeforeBatch).map((workflow) => [workflow['1'].inputs.text, workflow['5'].inputs.seed]),
+        [['批次 A', 100], ['批次 A', 101], ['批次 B', 100], ['批次 B', 101]],
+      );
+      const randomBatch = await postBatch({ ...batchBase, prompt: '隨機批次', seed: undefined, seedCount: 3 }).then((response) => response.json());
+      assert.equal(randomBatch.created, 3);
+      assert.ok(randomBatch.jobs.every((job) => job.seedMode === 'random' && Number.isSafeInteger(job.seed)));
+      const partialBatch = await postBatch({ ...batchBase, prompts: ['正常', 'x'.repeat(5_001)] }).then((response) => response.json());
+      assert.equal(partialBatch.created, 1);
+      assert.equal(partialBatch.errors.length, 1);
+      assert.equal(partialBatch.errors[0].index, 1);
+      assert.equal(partialBatch.errors[0].statusCode, 400);
+      const allFailedBatch = await postBatch({ ...batchBase, prompts: ['x'.repeat(5_001)] });
+      assert.equal(allFailedBatch.status, 400);
+      assert.match((await allFailedBatch.json()).error, /所有工作/);
+      assert.equal((await postBatch({ ...batchBase, prompts: Array(6).fill('多'), seedCount: 10 })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: ['a'], seedCount: 0 })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: 'not-array' })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: ['a'], seeds: [1, -1] })).status, 400);
+
       await fs.writeFile(workflowPath, JSON.stringify({
         '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{unknown_value}}' } },
       }));
