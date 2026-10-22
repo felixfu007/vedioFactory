@@ -92,7 +92,8 @@ docker compose up --build -d
 | `VEDIO_FACTORY_MODEL_DIR` | `%USERPROFILE%\vedioFactory\models` | 本機模型權重目錄 |
 | `VEDIO_FACTORY_DATA_DIR` | `%USERPROFILE%\vedioFactory` | 應用資料目錄；參數預設存於其下的 `presets/` |
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
-| `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | ComfyUI 匯出的 API 格式工作流 JSON 絕對路徑 |
+| `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | 選用：額外指定一個預設工作流 JSON 的絕對路徑 |
+| `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `PORT` | `8000` | 服務埠號 |
 
@@ -117,9 +118,43 @@ npm start
 
 預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
 
+## 多工作流與參數規格
+
+把 ComfyUI 匯出的 **API 格式** JSON 放進 `workflows\` 資料夾（或 `VEDIO_FACTORY_WORKFLOWS_DIR`），就會出現在「本機 ComfyUI 推論」區的工作流選單，不需重啟。可在旁邊放同名的 `.vf.json` 設定檔（選用），描述名稱、適用模型與參數限制：
+
+```
+workflows\
+  wan-t2v.json        ← ComfyUI 匯出的原檔，重新匯出時直接覆蓋
+  wan-t2v.vf.json     ← vedioFactory 設定（選用）
+```
+
+```json
+{
+  "name": "Wan 2.1 文生影片 480p",
+  "description": "832x480 原生解析度，16 FPS",
+  "videoModelIds": ["wan-2.1-t2v-1.3b"],
+  "requiresSourceImage": false,
+  "resolutions": ["832x480", "480x832"],
+  "allowCustomResolution": false,
+  "resolutionMultiple": 16,
+  "maxWidth": 1280,
+  "maxHeight": 1280,
+  "fps": [16],
+  "minDuration": 2,
+  "maxDuration": 5,
+  "defaults": { "resolution": "832x480", "fps": 16, "duration": 3 }
+}
+```
+
+所有欄位都可省略，省略時使用基本規格：8 種常用解析度（16:9、9:16、1:1、4:3、3:4、21:9）、FPS 12/16/24/25/30、長度 2–30 秒，以及寬高為 8 的倍數、介於 256 至 3840（總像素不超過 4K）的自訂解析度。選擇工作流後，「設定影片參數」區只會列出該工作流允許的值，後端也會拒絕超出範圍的參數。設定檔有錯時，工作流仍會列出但標示「設定錯誤」，無法送出工作。
+
+`VEDIO_FACTORY_COMFYUI_WORKFLOW` 仍可使用：它指定的檔案會成為預設工作流（ID 為 `default`）。參數預設會記住所選工作流；套用時若工作流不存在或不支援預設中的參數，介面會提示並改用可用值。
+
+規格也可由 `GET /api/workflows` 與 `GET /api/capabilities?workflowId=<id>` 取得。
+
 ## 本機 ComfyUI 工作流推論
 
-請先在本機啟動 ComfyUI，並在 ComfyUI 將工作流匯出為 **API 格式 JSON**。在 vedioFactory 啟動前設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`，再從介面建立本機推論工作。
+請先在本機啟動 ComfyUI，並在 ComfyUI 將工作流匯出為 **API 格式 JSON**，放入 `workflows\` 資料夾（或設定 `VEDIO_FACTORY_COMFYUI_WORKFLOW`），再從介面選擇工作流並建立本機推論工作。
 
 API 工作流可以在文字輸入中使用以下佔位符；`{{source_image}}` 可放在載入圖片節點的圖片欄位：
 

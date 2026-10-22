@@ -8,6 +8,12 @@ const path = require('node:path');
 const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { URL } = require('node:url');
+const {
+  BASE_CAPABILITIES,
+  isResolutionAllowed,
+  describeCustomRules,
+  narrowCapabilities,
+} = require('./assets/capabilities.js');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 8000);
@@ -22,6 +28,10 @@ const DEFAULT_DATA_DIR = path.resolve(
   process.env.VEDIO_FACTORY_DATA_DIR || path.join(os.homedir(), 'vedioFactory'),
 );
 const PRESETS_DIR_NAME = 'presets';
+const DEFAULT_WORKFLOWS_DIR = path.resolve(process.env.VEDIO_FACTORY_WORKFLOWS_DIR || path.join(__dirname, 'workflows'));
+const WORKFLOW_ID_PATTERN = /^[\w.-]{1,80}$/u;
+const WORKFLOW_META_SUFFIX = '.vf.json';
+const MAX_WORKFLOW_META_BYTES = 64 * 1024;
 const PRESET_SCHEMA_VERSION = 1;
 const MAX_PRESETS_PER_IMPORT = 500;
 const MAX_TAG_LENGTH = 100;
@@ -564,20 +574,27 @@ function validateVideoModelId(value) {
   return videoModel?.id || '';
 }
 
-function validateGenerationSettings(value) {
+function validateGenerationSettings(value, capabilities = BASE_CAPABILITIES) {
   const settings = isPlainObject(value) ? value : {};
-  const duration = Number(settings.duration ?? 6);
-  const fps = Number(settings.fps ?? 24);
-  const resolution = String(settings.resolution || '1280x720');
+  const duration = Number(settings.duration ?? capabilities.defaults.duration);
+  const fps = Number(settings.fps ?? capabilities.defaults.fps);
+  const resolution = String(settings.resolution || capabilities.defaults.resolution);
   const quality = String(settings.quality || 'balanced');
   const motion = Number(settings.motion ?? 0);
   const captionStrength = Number(settings.captionStrength ?? 0);
-  if (!Number.isInteger(duration) || duration < 2 || duration > 30) {
-    throw createRequestError('影片長度必須介於 2 至 30 秒。');
+  const { min, max } = capabilities.duration;
+  if (!Number.isInteger(duration) || duration < min || duration > max) {
+    throw createRequestError(`影片長度必須介於 ${min} 至 ${max} 秒。`);
   }
-  if (![12, 24, 30].includes(fps)) throw createRequestError('FPS 僅支援 12、24 或 30。');
-  if (!['1280x720', '1920x1080', '1080x1080', '720x1280'].includes(resolution)) {
-    throw createRequestError('不支援此影片解析度。');
+  if (!capabilities.fps.includes(fps)) {
+    throw createRequestError(`FPS 僅支援 ${capabilities.fps.join('、')}。`);
+  }
+  if (!isResolutionAllowed(resolution, capabilities)) {
+    const allowed = capabilities.resolutions.map((item) => item.value).join('、');
+    const custom = capabilities.customResolution.enabled
+      ? `；或自訂（${describeCustomRules(capabilities.customResolution)}）`
+      : '';
+    throw createRequestError(`不支援此影片解析度：${resolution}。可用：${allowed || '無預設選項'}${custom}。`);
   }
   if (!['draft', 'balanced', 'premium'].includes(quality)) {
     throw createRequestError('不支援此影片品質設定。');
@@ -595,7 +612,7 @@ function validateProjectTags(payload) {
   };
 }
 
-function validateInferencePayload(payload) {
+function validateInferencePayload(payload, capabilities = BASE_CAPABILITIES) {
   if (!isPlainObject(payload)) {
     throw createRequestError('推論工作資料格式錯誤。');
   }
@@ -626,7 +643,7 @@ function validateInferencePayload(payload) {
     moduleId: typeof payload.moduleId === 'string' ? payload.moduleId.slice(0, 100) : '',
     videoModelId: validateVideoModelId(payload.videoModelId) || VIDEO_MODEL_CATALOG[0].id,
     sourceImageDataUrl: payload.sourceImageDataUrl || '',
-    settings: validateGenerationSettings(payload.settings),
+    settings: validateGenerationSettings(payload.settings, capabilities),
   };
 }
 
@@ -640,7 +657,13 @@ function extractTemplateVariables(...templates) {
   return [...names];
 }
 
-function validatePresetPayload(payload) {
+function readWorkflowId(payload) {
+  const workflowId = readOptionalText(payload, 'workflowId', '工作流 ID', 80);
+  if (workflowId && !WORKFLOW_ID_PATTERN.test(workflowId)) throw createRequestError('工作流 ID 無效。');
+  return workflowId;
+}
+
+function validatePresetPayload(payload, capabilities = BASE_CAPABILITIES) {
   if (!isPlainObject(payload)) throw createRequestError('預設資料格式錯誤。');
   const name = readOptionalText(payload, 'name', '預設名稱', MAX_TAG_LENGTH);
   if (!name) throw createRequestError('預設名稱不可為空。');
@@ -658,9 +681,10 @@ function validatePresetPayload(payload) {
     negativePrompt: readOptionalText(payload, 'negativePrompt', '負面提示詞', 5_000),
     moduleId: readOptionalText(payload, 'moduleId', '生成模組', 100),
     videoModelId: validateVideoModelId(payload.videoModelId),
+    workflowId: readWorkflowId(payload),
     seedMode,
     seed: seedMode === 'fixed' ? validateSeed(payload.seed) : null,
-    settings: validateGenerationSettings(payload.settings),
+    settings: validateGenerationSettings(payload.settings, capabilities),
   };
 }
 
@@ -695,7 +719,7 @@ async function detectNvidiaRuntime() {
   }
 }
 
-async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig()) {
+async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig(), workflows = null) {
   const [gpu, comfy] = await Promise.all([
     detectNvidiaRuntime(),
     (async () => {
@@ -719,16 +743,17 @@ async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig()) {
     platform: process.platform,
     outputDir,
     modelDir: DEFAULT_MODEL_DIR,
-    workflowConfigured: Boolean(comfyUI.workflowPath),
+    workflowConfigured: workflows ? workflows.length > 0 : Boolean(comfyUI.workflowPath),
     comfyUI: {
       ...comfy,
-      workflowConfigured: Boolean(comfyUI.workflowPath),
+      workflowConfigured: workflows ? workflows.length > 0 : Boolean(comfyUI.workflowPath),
       workflowPath: comfyUI.workflowPath,
+      workflowCount: workflows ? workflows.length : Number(Boolean(comfyUI.workflowPath)),
     },
     gpu,
     guidance: [
       '請在本機啟動 ComfyUI；Docker 部署時使用 host.docker.internal，並透過防火牆限制存取。',
-      '設定 VEDIO_FACTORY_COMFYUI_WORKFLOW 指向 ComfyUI 匯出的 API 格式工作流 JSON。',
+      '將 ComfyUI 匯出的 API 格式工作流 JSON 放入 workflows 資料夾（可附同名 .vf.json 設定檔），或設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。',
       `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 .webm 影片會複製到 ${outputDir}。`,
     ],
   };
@@ -804,6 +829,7 @@ function createApp(options = {}) {
   let outputDir = normalizeOutputDir(options.outputDir || DEFAULT_OUTPUT_DIR);
   const dataDir = normalizeOutputDir(options.dataDir || DEFAULT_DATA_DIR);
   const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
+  const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
   const renameLocks = new Map();
   const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
@@ -841,16 +867,110 @@ function createApp(options = {}) {
     return response;
   }
 
-  async function loadComfyWorkflow() {
-    if (!comfyUI.workflowPath) {
-      throw createRequestError('尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。', 503);
+  function samePath(left, right) {
+    const normalize = (value) => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value));
+    return normalize(left) === normalize(right);
+  }
+
+  async function readWorkflowMeta(workflowPath) {
+    const metaPath = `${workflowPath.slice(0, -'.json'.length)}${WORKFLOW_META_SUFFIX}`;
+    const stats = await fs.stat(metaPath).catch(() => null);
+    if (!stats?.isFile()) return { metaPath: '', meta: {} };
+    if (stats.size > MAX_WORKFLOW_META_BYTES) throw new Error('設定檔超過 64 KB。');
+    let meta;
+    try {
+      meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    } catch {
+      throw new Error(`${path.basename(metaPath)} 不是有效的 JSON。`);
     }
-    const stats = await fs.stat(comfyUI.workflowPath).catch(() => null);
+    if (!isPlainObject(meta)) throw new Error(`${path.basename(metaPath)} 必須是 JSON 物件。`);
+    return { metaPath, meta };
+  }
+
+  async function describeWorkflow(entry) {
+    const workflow = {
+      id: entry.id,
+      name: entry.id,
+      description: '',
+      isDefault: Boolean(entry.isDefault),
+      workflowPath: entry.workflowPath,
+      metaPath: '',
+      videoModelIds: [],
+      requiresSourceImage: false,
+      capabilities: BASE_CAPABILITIES,
+      error: '',
+    };
+    try {
+      const { metaPath, meta } = await readWorkflowMeta(entry.workflowPath);
+      workflow.metaPath = metaPath;
+      const fields = readOptionalText(meta, 'name', 'name', 100);
+      if (fields) workflow.name = fields;
+      else if (entry.isDefault && entry.id === 'default') workflow.name = '預設工作流（VEDIO_FACTORY_COMFYUI_WORKFLOW）';
+      workflow.description = readOptionalText(meta, 'description', 'description', 1_000);
+      if (meta.videoModelIds !== undefined) {
+        if (!Array.isArray(meta.videoModelIds) || meta.videoModelIds.some((id) => typeof id !== 'string')) {
+          throw new Error('videoModelIds 必須是字串陣列。');
+        }
+        const unknown = meta.videoModelIds.filter((id) => !VIDEO_MODEL_CATALOG.some((model) => model.id === id));
+        if (unknown.length) throw new Error(`videoModelIds 包含未知模型：${unknown.join('、')}`);
+        workflow.videoModelIds = [...new Set(meta.videoModelIds)];
+      }
+      if (meta.requiresSourceImage !== undefined && typeof meta.requiresSourceImage !== 'boolean') {
+        throw new Error('requiresSourceImage 必須是 true 或 false。');
+      }
+      workflow.requiresSourceImage = meta.requiresSourceImage === true;
+      workflow.capabilities = narrowCapabilities(meta);
+    } catch (error) {
+      workflow.error = `工作流設定檔無效：${error.message}`;
+    }
+    return workflow;
+  }
+
+  async function listWorkflows() {
+    const entries = [];
+    const files = await fs.readdir(workflowsDir, { withFileTypes: true }).catch((error) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    for (const file of files) {
+      if (!file.isFile() || !file.name.endsWith('.json') || file.name.endsWith(WORKFLOW_META_SUFFIX)) continue;
+      const id = file.name.slice(0, -'.json'.length);
+      if (WORKFLOW_ID_PATTERN.test(id)) entries.push({ id, workflowPath: path.join(workflowsDir, file.name) });
+    }
+    if (comfyUI.workflowPath) {
+      const existing = entries.find((entry) => samePath(entry.workflowPath, comfyUI.workflowPath));
+      if (existing) {
+        existing.isDefault = true;
+      } else {
+        const id = entries.some((entry) => entry.id === 'default') ? 'env-default' : 'default';
+        entries.push({ id, workflowPath: comfyUI.workflowPath, isDefault: true });
+      }
+    }
+    const workflows = await Promise.all(entries.map(describeWorkflow));
+    const collator = new Intl.Collator('zh-Hant');
+    return workflows.sort((left, right) => (
+      Number(right.isDefault) - Number(left.isDefault) || collator.compare(left.name, right.name)
+    ));
+  }
+
+  async function resolveWorkflow(workflowId = '') {
+    const workflows = await listWorkflows();
+    if (!workflowId) return workflows.find((workflow) => workflow.isDefault) || workflows[0] || null;
+    const workflow = workflows.find((item) => item.id === workflowId);
+    if (!workflow) throw createRequestError(`找不到工作流：${workflowId}。`, 404);
+    return workflow;
+  }
+
+  async function loadComfyWorkflow(workflowEntry) {
+    if (!workflowEntry) {
+      throw createRequestError('尚未設定任何 ComfyUI 工作流。', 503);
+    }
+    const stats = await fs.stat(workflowEntry.workflowPath).catch(() => null);
     if (!stats?.isFile() || stats.size > MAX_COMFY_WORKFLOW_BYTES) {
       throw createRequestError('ComfyUI 工作流不存在或超過 10 MB。', 400);
     }
     try {
-      const raw = await fs.readFile(comfyUI.workflowPath);
+      const raw = await fs.readFile(workflowEntry.workflowPath);
       const workflow = JSON.parse(raw.toString('utf8'));
       if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
         throw new Error('workflow must be an object');
@@ -861,7 +981,7 @@ function createApp(options = {}) {
     }
   }
 
-  function inspectComfyWorkflow(workflow, modelId, hasSourceImage = false) {
+  function inspectComfyWorkflow(workflow, modelId, hasSourceImage = false, workflowEntry = null) {
     const errors = [];
     const warnings = [];
     const nodes = Object.entries(workflow);
@@ -915,6 +1035,12 @@ function createApp(options = {}) {
     if (!placeholders.has('model_id')) {
       warnings.push('工作流未使用 {{model_id}}；所選模型只會記錄在工作清單，不會改變工作流中的模型節點。');
     }
+    if (workflowEntry?.requiresSourceImage && !hasSourceImage && !placeholders.has('source_image')) {
+      errors.push('此工作流設定為需要來源圖片，但目前沒有選取圖片。');
+    }
+    if (workflowEntry?.videoModelIds.length && !workflowEntry.videoModelIds.includes(modelId)) {
+      warnings.push(`此工作流標示支援的模型為 ${workflowEntry.videoModelIds.join('、')}，與所選模型 ${modelId} 不同。`);
+    }
     const selectedModel = VIDEO_MODEL_CATALOG.find((model) => model.id === modelId);
     if (selectedModel?.category === 'image-to-video' && !placeholders.has('source_image')) {
       warnings.push('所選模型以圖生影片為主，但工作流沒有 {{source_image}}；請確認它確實支援目前的輸入方式。');
@@ -956,23 +1082,26 @@ function createApp(options = {}) {
     if (!VIDEO_MODEL_CATALOG.some((model) => model.id === modelId)) {
       throw createRequestError('找不到所選影片模型。');
     }
-    if (!comfyUI.workflowPath) {
-      return {
-        configured: false,
-        ready: false,
-        selectedModelId: modelId,
-        nodeCount: 0,
-        nodeTypes: [],
-        placeholders: [],
-        videoOutputNodes: [],
-        errors: ['尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。'],
-        warnings: [],
-        limitations: [],
-      };
-    }
-    const { workflow, workflowSha256 } = await loadComfyWorkflow();
+    const workflowEntry = await resolveWorkflow(readWorkflowId(isPlainObject(payload) ? payload : {}));
+    const emptyReport = {
+      configured: false,
+      ready: false,
+      workflowId: workflowEntry?.id || '',
+      selectedModelId: modelId,
+      nodeCount: 0,
+      nodeTypes: [],
+      placeholders: [],
+      videoOutputNodes: [],
+      errors: ['尚未設定任何工作流：請將 API 格式 JSON 放入 workflows 資料夾，或設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。'],
+      warnings: [],
+      limitations: [],
+    };
+    if (!workflowEntry) return emptyReport;
+    if (workflowEntry.error) return { ...emptyReport, configured: true, errors: [workflowEntry.error] };
+    const { workflow, workflowSha256 } = await loadComfyWorkflow(workflowEntry);
     return {
-      ...inspectComfyWorkflow(workflow, modelId, payload.hasSourceImage === true),
+      ...inspectComfyWorkflow(workflow, modelId, payload.hasSourceImage === true, workflowEntry),
+      workflowId: workflowEntry.id,
       workflowSha256,
     };
   }
@@ -1361,8 +1490,10 @@ function createApp(options = {}) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
 
-    const inference = validateInferencePayload(payload);
-    const runtime = await getInferenceRuntime(outputDir, comfyUI);
+    const workflowEntry = await resolveWorkflow(readWorkflowId(isPlainObject(payload) ? payload : {}));
+    if (workflowEntry?.error) throw createRequestError(workflowEntry.error);
+    const inference = validateInferencePayload(payload, workflowEntry?.capabilities || BASE_CAPABILITIES);
+    const runtime = await getInferenceRuntime(outputDir, comfyUI, workflowEntry ? [workflowEntry] : []);
     const jobId = crypto.randomUUID();
     const job = {
       id: jobId,
@@ -1393,21 +1524,23 @@ function createApp(options = {}) {
       ),
     };
 
-    if (comfyUI.workflowPath) {
+    if (workflowEntry) {
       if (!runtime.comfyUI.available) {
         throw createRequestError('無法連線至本機 ComfyUI，請確認服務已啟動。', 503);
       }
-      const { workflow, workflowSha256 } = await loadComfyWorkflow();
+      const { workflow, workflowSha256 } = await loadComfyWorkflow(workflowEntry);
       const preflight = inspectComfyWorkflow(
         workflow,
         inference.videoModelId,
         Boolean(inference.sourceImageDataUrl),
+        workflowEntry,
       );
       if (!preflight.ready) {
         throw createRequestError(`ComfyUI 工作流預檢失敗：${preflight.errors.join(' ')}`);
       }
       job.workflowPreflight = preflight;
-      job.workflowPath = comfyUI.workflowPath;
+      job.workflowId = workflowEntry.id;
+      job.workflowPath = workflowEntry.workflowPath;
       job.workflowSha256 = workflowSha256;
       let sourceImage = '';
       if (inference.sourceImageDataUrl) {
@@ -1527,12 +1660,18 @@ function createApp(options = {}) {
     return presets;
   }
 
+  async function getPresetCapabilities(payload, workflows) {
+    const workflowId = readWorkflowId(isPlainObject(payload) ? payload : {});
+    const workflow = workflowId ? (workflows || await listWorkflows()).find((item) => item.id === workflowId) : null;
+    return workflow && !workflow.error ? workflow.capabilities : BASE_CAPABILITIES;
+  }
+
   async function createPreset(payload) {
     const now = new Date().toISOString();
     const preset = {
       schemaVersion: PRESET_SCHEMA_VERSION,
       id: crypto.randomUUID(),
-      ...validatePresetPayload(payload),
+      ...validatePresetPayload(payload, await getPresetCapabilities(payload)),
       createdAt: now,
       updatedAt: now,
     };
@@ -1546,7 +1685,7 @@ function createApp(options = {}) {
     const preset = {
       schemaVersion: PRESET_SCHEMA_VERSION,
       id: existing.id,
-      ...validatePresetPayload(payload),
+      ...validatePresetPayload(payload, await getPresetCapabilities(payload)),
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
     };
@@ -1577,10 +1716,14 @@ function createApp(options = {}) {
       throw createRequestError(`單次最多匯入 ${MAX_PRESETS_PER_IMPORT} 筆預設。`, 413);
     }
     const now = new Date().toISOString();
+    const workflows = await listWorkflows();
+    const capabilitiesList = await Promise.all(payload.presets.map((entry) => (
+      getPresetCapabilities(entry, workflows).catch(() => BASE_CAPABILITIES)
+    )));
     // Validate every entry before writing so a bad file never half-imports.
     const presets = payload.presets.map((entry, index) => {
       try {
-        const fields = validatePresetPayload(entry);
+        const fields = validatePresetPayload(entry, capabilitiesList[index]);
         const createdAt = typeof entry.createdAt === 'string' && !Number.isNaN(Date.parse(entry.createdAt))
           ? entry.createdAt
           : now;
@@ -1619,10 +1762,13 @@ function createApp(options = {}) {
         warnings.push(`ComfyUI 回傳的來源圖片名稱（${comfyName}）與原工作不同，產出可能不一致。`);
       }
     }
-    let currentWorkflowSha256 = '';
-    if (comfyUI.workflowPath) {
-      currentWorkflowSha256 = await loadComfyWorkflow().then((loaded) => loaded.workflowSha256, () => '');
-    }
+    const workflows = await listWorkflows();
+    const currentWorkflow = workflows.find((workflow) => (
+      original.workflowId ? workflow.id === original.workflowId : samePath(workflow.workflowPath, original.workflowPath || '')
+    ));
+    const currentWorkflowSha256 = currentWorkflow
+      ? await loadComfyWorkflow(currentWorkflow).then((loaded) => loaded.workflowSha256, () => '')
+      : '';
     if (currentWorkflowSha256 !== original.workflowSha256) {
       warnings.push('目前設定的工作流已變更或無法讀取；本次使用原工作保存的工作流快照重新產出，與目前工作流的結果可能不同。');
     }
@@ -1657,6 +1803,7 @@ function createApp(options = {}) {
       modelDir: runtime.modelDir,
       workflowConfigured: original.workflowConfigured,
       comfyUIUrl: comfyUI.baseUrl,
+      workflowId: original.workflowId || '',
       workflowPath: original.workflowPath,
       workflowSha256: original.workflowSha256,
       submittedWorkflow: original.submittedWorkflow,
@@ -1693,7 +1840,20 @@ function createApp(options = {}) {
 
     if (requestUrl.pathname === '/api/inference/runtime' && request.method === 'GET') {
       await ensureOutputDir();
-      return sendJson(response, 200, await getInferenceRuntime(outputDir, comfyUI));
+      return sendJson(response, 200, await getInferenceRuntime(outputDir, comfyUI, await listWorkflows()));
+    }
+
+    if (requestUrl.pathname === '/api/workflows' && request.method === 'GET') {
+      return sendJson(response, 200, await listWorkflows());
+    }
+
+    if (requestUrl.pathname === '/api/capabilities' && request.method === 'GET') {
+      const workflowId = requestUrl.searchParams.get('workflowId') || '';
+      if (!workflowId) return sendJson(response, 200, { workflowId: '', ...BASE_CAPABILITIES });
+      if (!WORKFLOW_ID_PATTERN.test(workflowId)) throw createRequestError('工作流 ID 無效。');
+      const workflow = await resolveWorkflow(workflowId);
+      if (workflow.error) throw createRequestError(workflow.error);
+      return sendJson(response, 200, { workflowId: workflow.id, ...workflow.capabilities });
     }
 
     if (requestUrl.pathname === '/api/inference/workflow-check' && request.method === 'POST') {

@@ -27,6 +27,7 @@ async function main() {
     host: '127.0.0.1',
     outputDir: managedOutputDir,
     dataDir: path.join(managedOutputDir, 'app-data'),
+    workflowsDir: path.join(managedOutputDir, 'no-workflows'),
     maxVideoUploadBytes: 1024,
   });
   const address = app.server.address();
@@ -332,6 +333,25 @@ async function main() {
     const missingRerunResponse = await fetch(`${origin}/api/inference/jobs/not-found/rerun`, { method: 'POST' });
     assert.equal(missingRerunResponse.status, 404);
 
+    assert.deepEqual(await fetch(`${origin}/api/workflows`).then((response) => response.json()), []);
+    const baseCapabilities = await fetch(`${origin}/api/capabilities`).then((response) => response.json());
+    assert.equal(baseCapabilities.workflowId, '');
+    assert.ok(baseCapabilities.resolutions.some((item) => item.value === '1080x1920'));
+    assert.deepEqual(baseCapabilities.fps, [12, 16, 24, 25, 30]);
+    assert.equal(baseCapabilities.customResolution.enabled, true);
+    assert.equal((await fetch(`${origin}/api/capabilities?workflowId=missing`)).status, 404);
+    assert.equal((await fetch(`${origin}/api/capabilities?workflowId=..%2Fx`)).status, 400);
+    for (const [resolution, expectedStatus] of [['1000x600', 201], ['1001x600', 400], ['8000x600', 400], ['abc', 400]]) {
+      const resolutionResponse = await fetch(`${origin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'custom resolution', settings: { resolution } }),
+      });
+      assert.equal(resolutionResponse.status, expectedStatus, resolution);
+      if (expectedStatus === 201) await fs.rm((await resolutionResponse.json()).manifestPath);
+      else assert.match((await resolutionResponse.json()).error, /解析度/);
+    }
+
     // Parameter presets: CRUD, validation, export/import round trip.
     const presetsDir = path.join(managedOutputDir, 'app-data', 'presets');
     assert.equal(config.presetsDir, presetsDir);
@@ -492,6 +512,34 @@ async function main() {
     const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
+    const workflowsDir = path.join(comfyOutputDir, 'workflows');
+    await fs.mkdir(workflowsDir);
+    await fs.writeFile(path.join(workflowsDir, 'wan-t2v.json'), JSON.stringify({
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+      '2': { class_type: 'KSampler', inputs: { seed: '{{seed}}', width: '{{width}}', height: '{{height}}', fps: '{{fps}}' } },
+      '3': { class_type: 'SaveWEBM', inputs: { format: 'webm' } },
+    }));
+    await fs.writeFile(path.join(workflowsDir, 'wan-t2v.vf.json'), JSON.stringify({
+      name: 'Wan 文生影片',
+      description: '832x480 原生解析度',
+      videoModelIds: ['wan-2.1-t2v-1.3b'],
+      resolutions: ['832x480', '480x832'],
+      allowCustomResolution: false,
+      fps: [16],
+      minDuration: 2,
+      maxDuration: 5,
+      defaults: { resolution: '832x480', fps: 16, duration: 3 },
+    }));
+    await fs.writeFile(path.join(workflowsDir, 'needs-image.json'), JSON.stringify({
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+      '2': { class_type: 'SaveWEBM', inputs: { format: 'webm' } },
+    }));
+    await fs.writeFile(path.join(workflowsDir, 'needs-image.vf.json'), JSON.stringify({ requiresSourceImage: true }));
+    await fs.writeFile(path.join(workflowsDir, 'broken-meta.json'), JSON.stringify({
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+    }));
+    await fs.writeFile(path.join(workflowsDir, 'broken-meta.vf.json'), JSON.stringify({ fps: ['fast'] }));
+    await fs.writeFile(path.join(workflowsDir, 'invalid id!.json'), '{}');
     const workflowText = JSON.stringify({
       '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
       '2': { class_type: 'ModelLoader', inputs: { model: '{{model_id}}' } },
@@ -506,6 +554,7 @@ async function main() {
       host: '127.0.0.1',
       outputDir: comfyOutputDir,
       dataDir: path.join(comfyOutputDir, 'app-data'),
+      workflowsDir,
       comfyUIUrl: comfyOrigin,
       comfyUIWorkflowPath: workflowPath,
     });
@@ -515,6 +564,65 @@ async function main() {
       const comfyRuntime = await fetch(`${comfyAppOrigin}/api/inference/runtime`).then((response) => response.json());
       assert.equal(comfyRuntime.comfyUI.available, true);
       assert.equal(comfyRuntime.comfyUI.workflowConfigured, true);
+      assert.equal(comfyRuntime.comfyUI.workflowCount, 4);
+
+      const workflows = await fetch(`${comfyAppOrigin}/api/workflows`).then((response) => response.json());
+      assert.deepEqual(workflows.map((workflow) => workflow.id), ['default', 'broken-meta', 'needs-image', 'wan-t2v']);
+      assert.equal(workflows[0].isDefault, true);
+      assert.match(workflows.find((workflow) => workflow.id === 'broken-meta').error, /fps/);
+      const wanWorkflow = workflows.find((workflow) => workflow.id === 'wan-t2v');
+      assert.equal(wanWorkflow.name, 'Wan 文生影片');
+      assert.deepEqual(wanWorkflow.videoModelIds, ['wan-2.1-t2v-1.3b']);
+      const wanCapabilities = await fetch(`${comfyAppOrigin}/api/capabilities?workflowId=wan-t2v`).then((response) => response.json());
+      assert.deepEqual(wanCapabilities.resolutions.map((item) => item.value), ['832x480', '480x832']);
+      assert.deepEqual(wanCapabilities.fps, [16]);
+      assert.deepEqual(wanCapabilities.duration, { min: 2, max: 5 });
+      assert.equal(wanCapabilities.customResolution.enabled, false);
+      assert.deepEqual(wanCapabilities.defaults, { resolution: '832x480', fps: 16, duration: 3 });
+      assert.equal((await fetch(`${comfyAppOrigin}/api/capabilities?workflowId=broken-meta`)).status, 400);
+
+      const wanRejected = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'wan', workflowId: 'wan-t2v', settings: { resolution: '1280x720', fps: 16, duration: 3 } }),
+      });
+      assert.equal(wanRejected.status, 400);
+      assert.match((await wanRejected.json()).error, /832x480/);
+      const wanFpsRejected = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'wan', workflowId: 'wan-t2v', settings: { resolution: '832x480', fps: 24, duration: 3 } }),
+      });
+      assert.equal(wanFpsRejected.status, 400);
+      assert.match((await wanFpsRejected.json()).error, /FPS 僅支援 16/);
+      const brokenWorkflowJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'broken', workflowId: 'broken-meta' }),
+      });
+      assert.equal(brokenWorkflowJob.status, 400);
+      const missingWorkflowJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'missing', workflowId: 'nope' }),
+      });
+      assert.equal(missingWorkflowJob.status, 404);
+      const needsImagePreflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workflowId: 'needs-image', videoModelId: 'wan-2.1-t2v-1.3b', hasSourceImage: false }),
+      }).then((response) => response.json());
+      assert.equal(needsImagePreflight.ready, false);
+      assert.equal(needsImagePreflight.workflowId, 'needs-image');
+      assert.match(needsImagePreflight.errors.join(' '), /需要來源圖片/);
+      const otherModelPreflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workflowId: 'wan-t2v', videoModelId: 'ltx-video-098' }),
+      }).then((response) => response.json());
+      assert.equal(otherModelPreflight.ready, true);
+      assert.match(otherModelPreflight.warnings.join(' '), /標示支援的模型/);
+      const workflowPromptCount = comfyPromptCount;
       const preflight = await fetch(`${comfyAppOrigin}/api/inference/workflow-check`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -550,6 +658,8 @@ async function main() {
         body: JSON.stringify(reproduciblePayload),
       }).then((response) => response.json());
       assert.equal(comfyJob.status, 'queued');
+      assert.equal(comfyJob.workflowId, 'default');
+      assert.equal(comfyPromptCount, workflowPromptCount + 1);
       assert.equal(comfyJob.comfyPromptId, 'comfy-prompt-123');
       assert.equal(comfyWorkflow['1'].inputs.text, '本機 ComfyUI 測試');
       assert.equal(comfyWorkflow['2'].inputs.model, 'wan-2.1-t2v-1.3b');
