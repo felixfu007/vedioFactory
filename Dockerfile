@@ -2,14 +2,17 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+# ffmpeg 讓影片庫的「轉成 MP4」在容器內也能使用。
+RUN apk add --no-cache ffmpeg
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --chown=node:node server.js index.html ./
 COPY --chown=node:node assets ./assets
 COPY --chown=node:node modules ./modules
-RUN mkdir -p /data/output /data/models /data/app /workflows \
-  && chown -R node:node /data
+RUN mkdir -p /data/output /data/models /data/app /workflows /modules /comfyui-models \
+  && chown -R node:node /data /comfyui-models
 
 ENV HOST=0.0.0.0 \
     PORT=8000 \

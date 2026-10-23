@@ -1,6 +1,7 @@
 services:
   vediofactory:
     build: .
+    restart: unless-stopped
     ports:
       - "127.0.0.1:${VEDIO_FACTORY_PORT:-8000}:8000"
     environment:
@@ -10,17 +11,26 @@ services:
       VEDIO_FACTORY_MODEL_DIR: /data/models
       VEDIO_FACTORY_DATA_DIR: /data/app
       VEDIO_FACTORY_WORKFLOWS_DIR: /workflows
+      VEDIO_FACTORY_MODULES_DIR: /modules
+      VEDIO_FACTORY_COMFYUI_MODELS_DIR: /comfyui-models
       VEDIO_FACTORY_COMFYUI_URL: http://host.docker.internal:8188
       VEDIO_FACTORY_COMFYUI_WORKFLOW: ${VEDIO_FACTORY_COMFYUI_WORKFLOW:-}
+      VEDIO_FACTORY_ALLOWED_HOSTS: ${VEDIO_FACTORY_ALLOWED_HOSTS:-}
+      VEDIO_FACTORY_CIVITAI_TOKEN: ${VEDIO_FACTORY_CIVITAI_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 在 .env 指定主機資料夾（見 .env.example），就能和直接執行 npm start 共用同一份影片庫、
+    # 參數預設與 ComfyUI 模型資料夾；未指定時改用 Docker volume。
     volumes:
-      - vediofactory-output:/data/output
+      - ${VEDIO_FACTORY_HOST_OUTPUT_DIR:-vediofactory-output}:/data/output
+      - ${VEDIO_FACTORY_HOST_DATA_DIR:-vediofactory-app}:/data/app
+      - ${VEDIO_FACTORY_HOST_COMFYUI_MODELS_DIR:-vediofactory-comfyui-models}:/comfyui-models
       - vediofactory-models:/data/models
-      - vediofactory-app:/data/app
       - ./workflows:/workflows:ro
+      - ./modules:/modules:ro
 
 volumes:
   vediofactory-output:
   vediofactory-models:
   vediofactory-app:
+  vediofactory-comfyui-models:

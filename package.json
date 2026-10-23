@@ -4,7 +4,7 @@
   "description": "本機優先的 AI 影片生成服務網站，支援：",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --env-file-if-exists=.env server.js",
     "test": "npm run test:api",
     "test:all": "npm run test:api && npm run test:visual",
     "test:api": "node tests/backend-api.mjs",
