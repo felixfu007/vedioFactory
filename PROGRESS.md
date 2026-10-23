@@ -67,10 +67,24 @@ PR #8（疊在 #7 上）。
 - [x] S1 後端：`modules/<id>/module.json` 掃描（`VEDIO_FACTORY_MODULES_DIR`）、`GET /api/scenario-modules`、`/scenario-modules/<id>/<檔案>` 靜態服務、模組工作流註冊為 `module-<id>`、模組預設以 `module:<id>` 出現在預設清單（唯讀）、新增 `{{frames}}`（4n+1）佔位符、測試。
 - [x] S2 前端：`assets/scenario-kit.js`（人形骨架繪圖工具，ES module）、載入模組 Canvas 預覽並註冊為生成模組、內建預設唯讀。
 - [x] S3 三個模組：`modules/dance`、`modules/runway`、`modules/gym`（preview.js＋workflow.json〔Wan 2.2 TI2V 5B 文生影片，無 LoRA〕＋預設）。
-- [ ] S4 `tools/generate-examples.mjs`：產生 Canvas 與 ComfyUI 範例影片並檢查內容（時長、非黑畫面、動態）；在本機 GPU 實際產出三部 AI 影片。
-- [ ] S5 文件、PR、合併；之後規畫下一步（拆分 server.js／app.js、照片驅動的人物影片等）。
+- [x] S4 `tools/generate-examples.mjs`（`npm run examples`）：依序產生範例影片、監控 GPU 溫度、以 ffprobe／ffmpeg 檢查時長、解析度、非黑畫面與動態。
+- [x] S5 文件（README、modules/README.md）、PR #11。
 
-## 之前的下一步（暫緩）
+### 範例影片實際產出結果（2026-10-23，本機 RTX 5070 Ti）
 
-- 拆分 `server.js`、`assets/app.js`（ES modules）——於場景模組完成後再規畫。
-- 第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收——將由 S4 實際產出部分完成。
+| 模組 | 解析度 | 長度 | 用時 | 檢查 | 畫面確認 |
+| --- | --- | --- | --- | --- | --- |
+| 跳舞 dance | 1280×704 | 5.04 秒／121 幀 | 307 秒 | 通過（動態 17.2） | 霓虹舞台上的街舞舞者，舞步連續變化 |
+| 走秀 runway | 704×1280 | 5.04 秒／121 幀 | 317 秒 | 通過（動態 19.2） | 黑西裝模特兒在伸展台走向鏡頭，兩側觀眾 |
+| 健身房 gym | 1280×704 | 5.04 秒／121 幀 | 317 秒 | 通過（動態 7.9） | 第一次頭部出鏡；調整提示詞（遠景側面、從頭到腳）後重產，槓鈴深蹲完整入鏡 |
+
+GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用者影片庫（`%USERPROFILE%\Videos\vedioFactory`），報告為同資料夾的 `examples-report.json`。第一次產出、頭部出鏡的健身房影片（`comfyui-717567b5-1.webm`）也還在影片庫，可自行刪除。
+
+目標「透過追加模組產生三種範例影片」已達成，下一步待與使用者規畫。
+
+## 下一步候選（待規畫）
+
+- 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。
+- 照片驅動的人物影片：以使用者照片（需本人同意）為起始畫面的圖生影片模組（Wan 2.2 TI2V 圖生影片、Wan Animate 2）。
+- 更長的影片：多段串接或 Wan Animate 延伸，超過 5 秒。
+- 更多場景模組（產品展示、美食、房地產等）與模組範本產生器。
