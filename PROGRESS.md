@@ -45,7 +45,20 @@ PR #7（以 main 為基底；#5、#6 已由使用者合併）。
 - 另修正：手機寬度（390px）頁面橫向溢出（`.layout`/卡片 `min-width: 0`、長路徑換行、`library-grid` 最小欄寬）；佇列表格在自身容器內橫向捲動。
 - 測試：`npm run test:all` 通過。
 
+PR #8（疊在 #7 上）。
+
+### 第 9 項：輸入邊界、測試與結構整理 — 進行中
+
+- 決策（2026-10-22）：拆分 server.js / app.js 要等 #7、#8 合併後再做；前端拆檔採瀏覽器原生 ES modules（`<script type="module">`）。
+- 等待期間先做不搬移程式碼的部分（分支 `feature/request-guards`，基於 `feature/delivery-batch-queue`）：
+  - [x] Host 標頭檢查（防 DNS rebinding）＋ 跨來源 Origin 拒絕非 GET 請求（防 CSRF）；`VEDIO_FACTORY_ALLOWED_HOSTS` 可加入區網主機名稱。
+  - [ ] 補充其餘輸入驗證與測試。
+
 ## 下一步
 
-- 第 9 項：輸入邊界、測試與結構整理（拆分 server.js / app.js、風格模組改為檔案載入）。
-- 注意：執行 visual 測試前需 `npm ci`，並需本機 Chrome/Edge。
+- 等待使用者合併 PR #7 → #8 → #9（依序疊加）。合併後從 main 開新分支做第 9 項剩餘部分：
+  1. 拆分 `server.js`：路由、影片庫、ComfyUI/工作、預設、工作流/規格、交付、驗證等模組（CommonJS），行為不變、測試不改。
+  2. 拆分 `assets/app.js`：改為原生 ES modules（`<script type="module">`），風格模組改為 `assets/modules/*.js` 載入，`window.VedioFactory.registerModule` 保持相容。
+  3. 補充競態／大檔／資源釋放測試。
+- 未完成：第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收（需使用者在有 ComfyUI 與模型的機器上執行）。
+- 注意：visual 測試需 `npm ci` 與本機 Chrome/Edge。
