@@ -1029,8 +1029,11 @@ function createApp(options = {}) {
     }
     const workflows = await Promise.all(entries.map(describeWorkflow));
     const collator = new Intl.Collator('zh-Hant');
+    // Default first, then the user's own workflows, then scenario-module workflows.
     return workflows.sort((left, right) => (
-      Number(right.isDefault) - Number(left.isDefault) || collator.compare(left.name, right.name)
+      Number(right.isDefault) - Number(left.isDefault)
+      || Number(Boolean(left.scenarioModuleId)) - Number(Boolean(right.scenarioModuleId))
+      || collator.compare(left.name, right.name)
     ));
   }
 
@@ -1104,6 +1107,21 @@ function createApp(options = {}) {
       }, capabilities);
     }
 
+    let example = null;
+    if (manifest.example !== undefined) {
+      if (!isPlainObject(manifest.example)) throw new Error('example 必須是物件。');
+      const variables = manifest.example.variables ?? {};
+      if (!isPlainObject(variables) || Object.entries(variables).some(([key, value]) => (
+        !/^[\p{L}\p{N}_]{1,40}$/u.test(key) || typeof value !== 'string' || value.length > 200
+      ))) {
+        throw new Error('example.variables 必須是「變數名稱: 200 字以內文字」的物件。');
+      }
+      example = {
+        variables,
+        seed: manifest.example.seed === undefined ? null : validateSeed(manifest.example.seed),
+      };
+    }
+
     const safety = isPlainObject(manifest.safety) ? manifest.safety : {};
     if (safety.requiresPersonConsent !== undefined && typeof safety.requiresPersonConsent !== 'boolean') {
       throw new Error('safety.requiresPersonConsent 必須是 true 或 false。');
@@ -1118,6 +1136,7 @@ function createApp(options = {}) {
       canvas,
       workflow,
       preset,
+      example,
       safety: {
         requiresPersonConsent: safety.requiresPersonConsent === true,
         notes: readOptionalText(safety, 'notes', 'safety.notes', 1_000),

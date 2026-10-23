@@ -65,8 +65,8 @@ PR #8（疊在 #7 上）。
 ### 場景模組（分支 `feature/scenario-modules`）
 
 - [x] S1 後端：`modules/<id>/module.json` 掃描（`VEDIO_FACTORY_MODULES_DIR`）、`GET /api/scenario-modules`、`/scenario-modules/<id>/<檔案>` 靜態服務、模組工作流註冊為 `module-<id>`、模組預設以 `module:<id>` 出現在預設清單（唯讀）、新增 `{{frames}}`（4n+1）佔位符、測試。
-- [ ] S2 前端：`assets/scenario-kit.js`（人形骨架繪圖工具，ES module）、載入模組 Canvas 預覽並註冊為生成模組、內建預設唯讀。
-- [ ] S3 三個模組：`modules/dance`、`modules/runway`、`modules/gym`（preview.js＋workflow.json〔Wan 2.2 TI2V 5B 文生影片，無 LoRA〕＋預設）。
+- [x] S2 前端：`assets/scenario-kit.js`（人形骨架繪圖工具，ES module）、載入模組 Canvas 預覽並註冊為生成模組、內建預設唯讀。
+- [x] S3 三個模組：`modules/dance`、`modules/runway`、`modules/gym`（preview.js＋workflow.json〔Wan 2.2 TI2V 5B 文生影片，無 LoRA〕＋預設）。
 - [ ] S4 `tools/generate-examples.mjs`：產生 Canvas 與 ComfyUI 範例影片並檢查內容（時長、非黑畫面、動態）；在本機 GPU 實際產出三部 AI 影片。
 - [ ] S5 文件、PR、合併；之後規畫下一步（拆分 server.js／app.js、照片驅動的人物影片等）。
 
