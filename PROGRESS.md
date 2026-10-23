@@ -54,11 +54,23 @@ PR #8（疊在 #7 上）。
   - [x] Host 標頭檢查（防 DNS rebinding）＋ 跨來源 Origin 拒絕非 GET 請求（防 CSRF）；`VEDIO_FACTORY_ALLOWED_HOSTS` 可加入區網主機名稱。
   - [ ] 補充其餘輸入驗證與測試。
 
-## 下一步
+## 目前目標（2026-10-23 使用者指示）
 
-- 等待使用者合併 PR #7 → #8 → #9（依序疊加）。合併後從 main 開新分支做第 9 項剩餘部分：
-  1. 拆分 `server.js`：路由、影片庫、ComfyUI/工作、預設、工作流/規格、交付、驗證等模組（CommonJS），行為不變、測試不改。
-  2. 拆分 `assets/app.js`：改為原生 ES modules（`<script type="module">`），風格模組改為 `assets/modules/*.js` 載入，`window.VedioFactory.registerModule` 保持相容。
-  3. 補充競態／大檔／資源釋放測試。
-- 未完成：第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收（需使用者在有 ComfyUI 與模型的機器上執行）。
-- 注意：visual 測試需 `npm ci` 與本機 Chrome/Edge。
+使用者已授權合併並推進：「直到可以透過追加模組，產生跳舞影片、走秀影片、健身房影片三種範例影片後，再規畫下一步」。
+#7、#10（取代被自動關閉的 #8）、#9 已合併到 main。
+
+環境：本機 RTX 5070 Ti 16GB、ComfyUI 0.39 在 127.0.0.1:8188 執行；已安裝 wan2.2_ti2v_5B_fp16、wan2.2_vae、umt5_xxl_fp8 文字編碼器、Wan Animate 2。
+注意：本機另有 NSFW 類 LoRA，場景模組工作流不得載入任何 LoRA，負面提示詞需排除裸露／色情。
+
+### 場景模組（分支 `feature/scenario-modules`）
+
+- [x] S1 後端：`modules/<id>/module.json` 掃描（`VEDIO_FACTORY_MODULES_DIR`）、`GET /api/scenario-modules`、`/scenario-modules/<id>/<檔案>` 靜態服務、模組工作流註冊為 `module-<id>`、模組預設以 `module:<id>` 出現在預設清單（唯讀）、新增 `{{frames}}`（4n+1）佔位符、測試。
+- [ ] S2 前端：`assets/scenario-kit.js`（人形骨架繪圖工具，ES module）、載入模組 Canvas 預覽並註冊為生成模組、內建預設唯讀。
+- [ ] S3 三個模組：`modules/dance`、`modules/runway`、`modules/gym`（preview.js＋workflow.json〔Wan 2.2 TI2V 5B 文生影片，無 LoRA〕＋預設）。
+- [ ] S4 `tools/generate-examples.mjs`：產生 Canvas 與 ComfyUI 範例影片並檢查內容（時長、非黑畫面、動態）；在本機 GPU 實際產出三部 AI 影片。
+- [ ] S5 文件、PR、合併；之後規畫下一步（拆分 server.js／app.js、照片驅動的人物影片等）。
+
+## 之前的下一步（暫緩）
+
+- 拆分 `server.js`、`assets/app.js`（ES modules）——於場景模組完成後再規畫。
+- 第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收——將由 S4 實際產出部分完成。
