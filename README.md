@@ -103,6 +103,7 @@ vedioFactory 沒有登入機制，因此後端只接受以 `localhost`、`127.0.
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
 | `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | 選用：額外指定一個預設工作流 JSON 的絕對路徑 |
 | `VEDIO_FACTORY_FFMPEG` | `ffmpeg`（PATH） | 選用：ffmpeg 執行檔路徑，用於「轉成 MP4」 |
+| `VEDIO_FACTORY_MODULES_DIR` | 專案內 `modules\` | 場景模組資料夾，見「場景模組」 |
 | `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `VEDIO_FACTORY_ALLOWED_HOSTS` | 空值 | 選用：逗號分隔的額外主機名稱（例如 `studio.local,192.168.1.20`），允許以這些名稱連線 |
@@ -128,6 +129,30 @@ npm start
 - **匯出／匯入**：匯出全部預設為 JSON，方便在其他機器或同事間交接；匯入時會先驗證全部內容，任一筆無效就不寫入任何預設，相同 ID 的預設會被覆蓋。
 
 預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
+
+## 場景模組（跳舞、走秀、健身房）
+
+`modules\` 資料夾裡的每個子資料夾都是一個「場景模組」，放進新資料夾後重新整理網頁就會出現新的影片類型。內建三個模組：
+
+| 模組 | Canvas 預覽（不需 GPU） | ComfyUI AI 影片 |
+| --- | --- | --- |
+| 跳舞影片 `dance` | 舞者隨節拍換舞步、舞台燈光 | Wan 2.2 TI2V 5B，橫式 1280×704、5 秒 |
+| 走秀影片 `runway` | 透視伸展台、台步、閃光燈 | Wan 2.2 TI2V 5B，直式 704×1280、5 秒 |
+| 健身房影片 `gym` | 槓鈴深蹲、次數計數 | Wan 2.2 TI2V 5B，橫式 1280×704、5 秒 |
+
+使用方式：在「客戶專案與參數預設」選擇「［場景模組］跳舞影片」等預設，確認變數後按「套用預設」。之後按「生成影片」會產生 Canvas 預覽影片；按「建立本機推論工作」則會用 ComfyUI 產生 AI 影片。
+
+產生三部 AI 範例影片（依序執行、每部之間讓 GPU 休息，並自動檢查時長、解析度、非黑畫面與動態）：
+
+```powershell
+npm run examples
+# 只產生其中幾種，或改變長度：
+node tools/generate-examples.mjs --only dance,gym --duration 4
+```
+
+影片會匯入影片庫（客戶「範例」、專案「場景模組」），檢查報告寫在輸出資料夾的 `examples-report.json`。需要本機 ComfyUI 已安裝 `wan2.2_ti2v_5B_fp16.safetensors`、`wan2.2_vae.safetensors` 與 `umt5_xxl_fp8_e4m3fn_scaled.safetensors`，檢查需要 ffmpeg／ffprobe。
+
+自行製作模組請見 [modules/README.md](modules/README.md)。
 
 ## 批次、工作佇列與交付資料夾
 

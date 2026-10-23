@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "gym",
+  "name": "健身房影片",
+  "description": "健身者在健身房做訓練動作。Canvas 預覽會畫出深蹲動作、次數計數與健身房背景；ComfyUI 版本用 Wan 2.2 產生真實健身影片。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "健身",
+    "運動"
+  ],
+  "canvas": {
+    "entry": "preview.js",
+    "tagline": "深蹲訓練與次數計數",
+    "bestFor": "健身房招生、教練課程、運動品牌"
+  },
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 文生影片，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "健身房影片（Wan 2.2 文生影片）",
+    "defaults": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "preset": {
+    "description": "健身房重量訓練，橫式 5 秒。",
+    "promptTemplate": "遠景側面拍攝，一位{athlete}在現代健身房中央做{exercise}，從頭到腳完整出現在畫面中，雙手握住扛在肩上的槓鈴，緩慢下蹲再站起，重複多次，動作標準有力，背景有健身器材與鏡子，明亮自然光，固定機位，運動廣告質感，高畫質",
+    "storyTemplate": "{athlete}在健身房做{exercise}，連續完成多次標準動作。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "athlete": "穿著運動背心與運動短褲的健身教練",
+      "exercise": "槓鈴深蹲"
+    },
+    "seed": 20261025
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "若加入真人照片作為來源，必須取得照片中人物的同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}

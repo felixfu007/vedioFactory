@@ -31,6 +31,11 @@ const PRESETS_DIR_NAME = 'presets';
 const DEFAULT_WORKFLOWS_DIR = path.resolve(process.env.VEDIO_FACTORY_WORKFLOWS_DIR || path.join(__dirname, 'workflows'));
 const WORKFLOW_ID_PATTERN = /^[\w.-]{1,80}$/u;
 const WORKFLOW_META_SUFFIX = '.vf.json';
+const DEFAULT_MODULES_DIR = path.resolve(process.env.VEDIO_FACTORY_MODULES_DIR || path.join(__dirname, 'modules'));
+const MODULE_ID_PATTERN = /^[a-z\d][a-z\d-]{0,40}$/u;
+const MODULE_PRESET_ID_PATTERN = /^module:[a-z\d][a-z\d-]{0,40}$/u;
+const MODULE_ASSET_PATTERN = /^[\w-]+(?:\.[\w-]+)*\.(?:js|json|png|jpe?g|webp|svg)$/u;
+const MAX_MODULE_MANIFEST_BYTES = 256 * 1024;
 const MAX_WORKFLOW_META_BYTES = 64 * 1024;
 const PRESET_SCHEMA_VERSION = 1;
 const MAX_PRESETS_PER_IMPORT = 500;
@@ -320,6 +325,8 @@ const contentTypes = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
   '.gif': 'image/gif',
@@ -677,7 +684,9 @@ function validateInferencePayload(payload, capabilities = BASE_CAPABILITIES) {
   const hasSeed = payload.seed !== undefined && payload.seed !== null && payload.seed !== '';
   const seed = hasSeed ? validateSeed(payload.seed) : generateSeed();
   const presetId = readOptionalText(payload, 'presetId', '預設 ID', 100);
-  if (presetId && !UUID_PATTERN.test(presetId)) throw createRequestError('預設 ID 無效。');
+  if (presetId && !UUID_PATTERN.test(presetId) && !MODULE_PRESET_ID_PATTERN.test(presetId)) {
+    throw createRequestError('預設 ID 無效。');
+  }
   return {
     prompt,
     story,
@@ -877,6 +886,7 @@ function createApp(options = {}) {
   const dataDir = normalizeOutputDir(options.dataDir || DEFAULT_DATA_DIR);
   const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
   const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
+  const modulesDir = path.resolve(options.modulesDir || DEFAULT_MODULES_DIR);
   // [command, ...prefixArgs] so tests can substitute a script run by node.
   const ffmpegCommand = options.ffmpegCommand || DEFAULT_FFMPEG_COMMAND;
   const allowedHostnames = new Set([
@@ -956,8 +966,11 @@ function createApp(options = {}) {
       error: '',
     };
     try {
-      const { metaPath, meta } = await readWorkflowMeta(entry.workflowPath);
+      const { metaPath, meta } = entry.meta
+        ? { metaPath: entry.metaPath, meta: entry.meta }
+        : await readWorkflowMeta(entry.workflowPath);
       workflow.metaPath = metaPath;
+      if (entry.scenarioModuleId) workflow.scenarioModuleId = entry.scenarioModuleId;
       const fields = readOptionalText(meta, 'name', 'name', 100);
       if (fields) workflow.name = fields;
       else if (entry.isDefault && entry.id === 'default') workflow.name = '預設工作流（VEDIO_FACTORY_COMFYUI_WORKFLOW）';
@@ -1001,11 +1014,203 @@ function createApp(options = {}) {
         entries.push({ id, workflowPath: comfyUI.workflowPath, isDefault: true });
       }
     }
+    for (const scenarioModule of await listScenarioModules()) {
+      if (scenarioModule.error || !scenarioModule.workflow) continue;
+      const id = scenarioModule.workflow.id;
+      const duplicateIndex = entries.findIndex((entry) => entry.id === id);
+      if (duplicateIndex !== -1) entries.splice(duplicateIndex, 1);
+      entries.push({
+        id,
+        workflowPath: scenarioModule.workflow.path,
+        meta: scenarioModule.workflow.meta,
+        metaPath: scenarioModule.manifestPath,
+        scenarioModuleId: scenarioModule.id,
+      });
+    }
     const workflows = await Promise.all(entries.map(describeWorkflow));
     const collator = new Intl.Collator('zh-Hant');
+    // Default first, then the user's own workflows, then scenario-module workflows.
     return workflows.sort((left, right) => (
-      Number(right.isDefault) - Number(left.isDefault) || collator.compare(left.name, right.name)
+      Number(right.isDefault) - Number(left.isDefault)
+      || Number(Boolean(left.scenarioModuleId)) - Number(Boolean(right.scenarioModuleId))
+      || collator.compare(left.name, right.name)
     ));
+  }
+
+  // Scenario modules: modules/<id>/module.json bundles a Canvas preview, a ComfyUI workflow and a preset.
+  async function readScenarioModule(id) {
+    const moduleDir = path.join(modulesDir, id);
+    const manifestPath = path.join(moduleDir, 'module.json');
+    const stats = await fs.stat(manifestPath).catch(() => null);
+    if (!stats?.isFile()) throw new Error('缺少 module.json。');
+    if (stats.size > MAX_MODULE_MANIFEST_BYTES) throw new Error('module.json 超過 256 KB。');
+    let manifest;
+    try {
+      manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    } catch {
+      throw new Error('module.json 不是有效的 JSON。');
+    }
+    if (!isPlainObject(manifest)) throw new Error('module.json 必須是 JSON 物件。');
+    if (manifest.id !== id) throw new Error(`module.json 的 id 必須與資料夾名稱「${id}」相同。`);
+    const name = readOptionalText(manifest, 'name', 'name', 100);
+    if (!name) throw new Error('module.json 缺少 name。');
+    if (manifest.tags !== undefined && (
+      !Array.isArray(manifest.tags) || manifest.tags.length > 10
+      || manifest.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 30)
+    )) {
+      throw new Error('tags 必須是最多 10 個、每個 30 字以內的字串陣列。');
+    }
+
+    async function readModuleFile(field, value, extension) {
+      if (typeof value !== 'string' || !MODULE_ASSET_PATTERN.test(value) || !value.endsWith(extension)) {
+        throw new Error(`${field} 必須是模組資料夾內的 ${extension} 檔名。`);
+      }
+      const filePath = path.join(moduleDir, value);
+      if (!(await fs.stat(filePath).catch(() => null))?.isFile()) throw new Error(`找不到 ${field}：${value}。`);
+      return filePath;
+    }
+
+    let canvas = null;
+    if (manifest.canvas !== undefined) {
+      if (!isPlainObject(manifest.canvas)) throw new Error('canvas 必須是物件。');
+      await readModuleFile('canvas.entry', manifest.canvas.entry, '.js');
+      canvas = {
+        moduleId: `scenario-${id}`,
+        url: `/scenario-modules/${id}/${manifest.canvas.entry}`,
+        tagline: readOptionalText(manifest.canvas, 'tagline', 'canvas.tagline', 100),
+        bestFor: readOptionalText(manifest.canvas, 'bestFor', 'canvas.bestFor', 200),
+      };
+    }
+
+    let workflow = null;
+    let capabilities = BASE_CAPABILITIES;
+    if (manifest.workflow !== undefined) {
+      if (!isPlainObject(manifest.workflow)) throw new Error('workflow 必須是物件。');
+      const { file, ...meta } = manifest.workflow;
+      const workflowPath = await readModuleFile('workflow.file', file, '.json');
+      capabilities = narrowCapabilities(meta);
+      workflow = {
+        id: `module-${id}`,
+        path: workflowPath,
+        meta: { ...meta, name: meta.name || `${name}（場景模組）` },
+      };
+    }
+
+    let preset = null;
+    if (manifest.preset !== undefined) {
+      if (!isPlainObject(manifest.preset)) throw new Error('preset 必須是物件。');
+      preset = validatePresetPayload({
+        ...manifest.preset,
+        name: manifest.preset.name || name,
+        moduleId: manifest.preset.moduleId ?? canvas?.moduleId ?? '',
+        workflowId: manifest.preset.workflowId ?? workflow?.id ?? '',
+      }, capabilities);
+    }
+
+    let example = null;
+    if (manifest.example !== undefined) {
+      if (!isPlainObject(manifest.example)) throw new Error('example 必須是物件。');
+      const variables = manifest.example.variables ?? {};
+      if (!isPlainObject(variables) || Object.entries(variables).some(([key, value]) => (
+        !/^[\p{L}\p{N}_]{1,40}$/u.test(key) || typeof value !== 'string' || value.length > 200
+      ))) {
+        throw new Error('example.variables 必須是「變數名稱: 200 字以內文字」的物件。');
+      }
+      example = {
+        variables,
+        seed: manifest.example.seed === undefined ? null : validateSeed(manifest.example.seed),
+      };
+    }
+
+    const safety = isPlainObject(manifest.safety) ? manifest.safety : {};
+    if (safety.requiresPersonConsent !== undefined && typeof safety.requiresPersonConsent !== 'boolean') {
+      throw new Error('safety.requiresPersonConsent 必須是 true 或 false。');
+    }
+    return {
+      id,
+      name,
+      description: readOptionalText(manifest, 'description', 'description', 1_000),
+      version: readOptionalText(manifest, 'version', 'version', 40),
+      tags: (manifest.tags || []).map((tag) => tag.trim()),
+      manifestPath,
+      canvas,
+      workflow,
+      preset,
+      example,
+      safety: {
+        requiresPersonConsent: safety.requiresPersonConsent === true,
+        notes: readOptionalText(safety, 'notes', 'safety.notes', 1_000),
+      },
+      error: '',
+    };
+  }
+
+  async function listScenarioModules() {
+    const entries = await fs.readdir(modulesDir, { withFileTypes: true }).catch((error) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    const scenarioModules = [];
+    for (const entry of entries) {
+      // Folders starting with "_" or "." hold shared assets, not modules.
+      if (!entry.isDirectory() || /^[_.]/u.test(entry.name)) continue;
+      if (!MODULE_ID_PATTERN.test(entry.name)) {
+        scenarioModules.push({ id: entry.name, name: entry.name, error: '模組資料夾名稱只能使用小寫英數字與 -。' });
+        continue;
+      }
+      try {
+        scenarioModules.push(await readScenarioModule(entry.name));
+      } catch (error) {
+        scenarioModules.push({ id: entry.name, name: entry.name, error: `場景模組無效：${error.message}` });
+      }
+    }
+    const collator = new Intl.Collator('zh-Hant');
+    return scenarioModules.sort((left, right) => collator.compare(left.name, right.name));
+  }
+
+  function toScenarioModuleResponse(scenarioModule) {
+    const { manifestPath, workflow, ...rest } = scenarioModule;
+    return {
+      ...rest,
+      workflowId: workflow?.id || '',
+      presetId: scenarioModule.preset ? `module:${scenarioModule.id}` : '',
+    };
+  }
+
+  async function listModulePresets() {
+    return (await listScenarioModules())
+      .filter((scenarioModule) => !scenarioModule.error && scenarioModule.preset)
+      .map((scenarioModule) => ({
+        schemaVersion: PRESET_SCHEMA_VERSION,
+        id: `module:${scenarioModule.id}`,
+        ...scenarioModule.preset,
+        builtIn: true,
+        scenarioModuleId: scenarioModule.id,
+      }));
+  }
+
+  async function serveScenarioModuleAsset(response, requestUrl) {
+    const match = /^\/scenario-modules\/([^/]+)\/([^/]+)$/u.exec(requestUrl.pathname);
+    let id = '';
+    let fileName = '';
+    try {
+      id = decodeURIComponent(match?.[1] || '');
+      fileName = decodeURIComponent(match?.[2] || '');
+    } catch {
+      id = '';
+    }
+    if (!MODULE_ID_PATTERN.test(id) || !MODULE_ASSET_PATTERN.test(fileName)) {
+      sendText(response, 404, 'Not found');
+      return;
+    }
+    const filePath = path.join(modulesDir, id, fileName);
+    const stats = await fs.stat(filePath).catch(() => null);
+    if (!stats?.isFile()) {
+      sendText(response, 404, 'Not found');
+      return;
+    }
+    response.writeHead(200, { 'content-type': getContentType(filePath), 'cache-control': 'no-cache' });
+    response.end(await fs.readFile(filePath));
   }
 
   async function resolveWorkflow(workflowId = '') {
@@ -1076,6 +1281,7 @@ function createApp(options = {}) {
       'motion',
       'caption_strength',
       'source_image',
+      'frames',
     ]);
     const unsupportedPlaceholders = [...placeholders].filter((name) => !supportedPlaceholders.has(name));
     if (unsupportedPlaceholders.length) {
@@ -1699,6 +1905,8 @@ function createApp(options = {}) {
         motion: Number(job.settings.motion) || 0,
         caption_strength: Number(job.settings.captionStrength) || 0,
         source_image: sourceImage,
+        // Wan-style video latents need 4n+1 frames.
+        frames: Math.max(1, Math.round(((Number(job.settings.duration) || 6) * (Number(job.settings.fps) || 24)) / 4) * 4 + 1),
       };
       const apiWorkflow = applyWorkflowVariables(workflow, variables);
       if (/\{\{[^{}]+\}\}/u.test(JSON.stringify(apiWorkflow))) {
@@ -1815,7 +2023,14 @@ function createApp(options = {}) {
     return toPresetResponse(preset);
   }
 
+  function assertEditablePreset(presetId) {
+    if (MODULE_PRESET_ID_PATTERN.test(String(presetId))) {
+      throw createRequestError('場景模組內建的預設不可修改或刪除；請另存為新預設。', 409);
+    }
+  }
+
   async function updatePreset(presetId, payload) {
+    assertEditablePreset(presetId);
     const existing = await readPreset(presetId);
     if (!existing) throw createRequestError('找不到參數預設。', 404);
     const preset = {
@@ -1830,6 +2045,7 @@ function createApp(options = {}) {
   }
 
   async function deletePreset(presetId) {
+    assertEditablePreset(presetId);
     const presetPath = getPresetPath(presetId);
     if (!(await fileExists(presetPath))) throw createRequestError('找不到參數預設。', 404);
     await fs.rm(presetPath, { force: true });
@@ -2162,6 +2378,7 @@ function createApp(options = {}) {
         backendAvailable: true,
         outputDir,
         presetsDir,
+        modulesDir,
         ffmpeg: await detectFfmpeg(),
         storageMode: 'backend',
         localGpuPreferred: true,
@@ -2219,7 +2436,12 @@ function createApp(options = {}) {
     }
 
     if (requestUrl.pathname === '/api/presets' && request.method === 'GET') {
-      return sendJson(response, 200, (await listPresets()).map(toPresetResponse));
+      const presets = [...await listModulePresets(), ...await listPresets()];
+      return sendJson(response, 200, presets.map(toPresetResponse));
+    }
+
+    if (requestUrl.pathname === '/api/scenario-modules' && request.method === 'GET') {
+      return sendJson(response, 200, (await listScenarioModules()).map(toScenarioModuleResponse));
     }
 
     if (requestUrl.pathname === '/api/presets' && request.method === 'POST') {
@@ -2455,6 +2677,10 @@ function createApp(options = {}) {
     try {
       guardRequest(request);
       const requestUrl = new URL(request.url, `http://${request.headers.host || `${HOST}:${PORT}`}`);
+      if (requestUrl.pathname.startsWith('/scenario-modules/') && request.method === 'GET') {
+        await serveScenarioModuleAsset(response, requestUrl);
+        return;
+      }
       if (requestUrl.pathname.startsWith('/api/')) {
         const handled = await handleApi(request, response, requestUrl);
         if (handled === false) {

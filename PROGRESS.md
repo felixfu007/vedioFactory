@@ -54,11 +54,37 @@ PR #8（疊在 #7 上）。
   - [x] Host 標頭檢查（防 DNS rebinding）＋ 跨來源 Origin 拒絕非 GET 請求（防 CSRF）；`VEDIO_FACTORY_ALLOWED_HOSTS` 可加入區網主機名稱。
   - [ ] 補充其餘輸入驗證與測試。
 
-## 下一步
+## 目前目標（2026-10-23 使用者指示）
 
-- 等待使用者合併 PR #7 → #8 → #9（依序疊加）。合併後從 main 開新分支做第 9 項剩餘部分：
-  1. 拆分 `server.js`：路由、影片庫、ComfyUI/工作、預設、工作流/規格、交付、驗證等模組（CommonJS），行為不變、測試不改。
-  2. 拆分 `assets/app.js`：改為原生 ES modules（`<script type="module">`），風格模組改為 `assets/modules/*.js` 載入，`window.VedioFactory.registerModule` 保持相容。
-  3. 補充競態／大檔／資源釋放測試。
-- 未完成：第 4 項 Windows 11 / RTX 5070 Ti 實機端對端驗收（需使用者在有 ComfyUI 與模型的機器上執行）。
-- 注意：visual 測試需 `npm ci` 與本機 Chrome/Edge。
+使用者已授權合併並推進：「直到可以透過追加模組，產生跳舞影片、走秀影片、健身房影片三種範例影片後，再規畫下一步」。
+#7、#10（取代被自動關閉的 #8）、#9 已合併到 main。
+
+環境：本機 RTX 5070 Ti 16GB、ComfyUI 0.39 在 127.0.0.1:8188 執行；已安裝 wan2.2_ti2v_5B_fp16、wan2.2_vae、umt5_xxl_fp8 文字編碼器、Wan Animate 2。
+注意：本機另有 NSFW 類 LoRA，場景模組工作流不得載入任何 LoRA，負面提示詞需排除裸露／色情。
+
+### 場景模組（分支 `feature/scenario-modules`）
+
+- [x] S1 後端：`modules/<id>/module.json` 掃描（`VEDIO_FACTORY_MODULES_DIR`）、`GET /api/scenario-modules`、`/scenario-modules/<id>/<檔案>` 靜態服務、模組工作流註冊為 `module-<id>`、模組預設以 `module:<id>` 出現在預設清單（唯讀）、新增 `{{frames}}`（4n+1）佔位符、測試。
+- [x] S2 前端：`assets/scenario-kit.js`（人形骨架繪圖工具，ES module）、載入模組 Canvas 預覽並註冊為生成模組、內建預設唯讀。
+- [x] S3 三個模組：`modules/dance`、`modules/runway`、`modules/gym`（preview.js＋workflow.json〔Wan 2.2 TI2V 5B 文生影片，無 LoRA〕＋預設）。
+- [x] S4 `tools/generate-examples.mjs`（`npm run examples`）：依序產生範例影片、監控 GPU 溫度、以 ffprobe／ffmpeg 檢查時長、解析度、非黑畫面與動態。
+- [x] S5 文件（README、modules/README.md）、PR #11。
+
+### 範例影片實際產出結果（2026-10-23，本機 RTX 5070 Ti）
+
+| 模組 | 解析度 | 長度 | 用時 | 檢查 | 畫面確認 |
+| --- | --- | --- | --- | --- | --- |
+| 跳舞 dance | 1280×704 | 5.04 秒／121 幀 | 307 秒 | 通過（動態 17.2） | 霓虹舞台上的街舞舞者，舞步連續變化 |
+| 走秀 runway | 704×1280 | 5.04 秒／121 幀 | 317 秒 | 通過（動態 19.2） | 黑西裝模特兒在伸展台走向鏡頭，兩側觀眾 |
+| 健身房 gym | 1280×704 | 5.04 秒／121 幀 | 317 秒 | 通過（動態 7.9） | 第一次頭部出鏡；調整提示詞（遠景側面、從頭到腳）後重產，槓鈴深蹲完整入鏡 |
+
+GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用者影片庫（`%USERPROFILE%\Videos\vedioFactory`），報告為同資料夾的 `examples-report.json`。第一次產出、頭部出鏡的健身房影片（`comfyui-717567b5-1.webm`）也還在影片庫，可自行刪除。
+
+目標「透過追加模組產生三種範例影片」已達成，下一步待與使用者規畫。
+
+## 下一步候選（待規畫）
+
+- 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。
+- 照片驅動的人物影片：以使用者照片（需本人同意）為起始畫面的圖生影片模組（Wan 2.2 TI2V 圖生影片、Wan Animate 2）。
+- 更長的影片：多段串接或 Wan Animate 延伸，超過 5 秒。
+- 更多場景模組（產品展示、美食、房地產等）與模組範本產生器。

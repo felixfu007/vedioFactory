@@ -246,7 +246,7 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
   const page = await browser.newPage();
   try {
     await page.goto(origin, { waitUntil: 'networkidle0' });
-    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 5);
     await page.select('#presetSelect', preset.id);
     await page.waitForSelector('#presetVariables input[data-variable="product"]');
     await page.type('#presetVariables input[data-variable="product"]', '新款耳機');
@@ -342,7 +342,7 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
     await page.select('#jobStatusFilter', 'active');
     assert.equal(await page.$eval('#jobsTable', (table) => table.hidden), true);
     assert.equal(await page.$eval('#jobsEmpty', (empty) => empty.textContent), '沒有符合篩選條件的工作。');
-    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 5);
     const optionValues = (selector) => page.$$eval(`${selector} option`, (options) => options.map((option) => option.value));
     assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');
     assert.ok((await optionValues('#resolutionInput')).includes('custom'));
@@ -379,6 +379,100 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
   }
 }
 
+const SCENARIO_MODULES = [
+  { id: 'dance', resolution: '1280x704', variable: 'dancer' },
+  { id: 'runway', resolution: '704x1280', variable: 'model' },
+  { id: 'gym', resolution: '1280x704', variable: 'athlete' },
+];
+
+// Samples two frames of a stored video in the page and reports brightness and how much the picture changed.
+async function measureVideoMotion(page, previewUrl) {
+  return page.evaluate(async (url) => {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.src = url;
+    await new Promise((resolve, reject) => {
+      video.addEventListener('loadeddata', resolve, { once: true });
+      video.addEventListener('error', () => reject(new Error('video load failed')), { once: true });
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = Math.round((160 * video.videoHeight) / video.videoWidth);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const grab = async (time) => {
+      video.currentTime = time;
+      await new Promise((resolve) => video.addEventListener('seeked', resolve, { once: true }));
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    };
+    const first = await grab(0.2);
+    const second = await grab(1.4);
+    let brightness = 0;
+    let difference = 0;
+    for (let index = 0; index < first.length; index += 4) {
+      brightness += (second[index] + second[index + 1] + second[index + 2]) / 3;
+      difference += Math.abs(first[index] - second[index]) + Math.abs(first[index + 1] - second[index + 1]);
+    }
+    const pixels = first.length / 4;
+    return {
+      width: video.videoWidth,
+      height: video.videoHeight,
+      brightness: brightness / pixels,
+      difference: difference / pixels,
+    };
+  }, previewUrl);
+}
+
+async function runScenarioModulesScenario(browser, origin, managedOutputDir) {
+  await resetDirectory(managedOutputDir);
+  const page = await browser.newPage();
+  const results = [];
+  try {
+    await page.goto(origin, { waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => ['scenario-dance', 'scenario-runway', 'scenario-gym']
+      .every((id) => [...document.querySelectorAll('#moduleSelect option')].some((option) => option.value === id)));
+    for (const [index, scenario] of SCENARIO_MODULES.entries()) {
+      await page.select('#presetSelect', `module:${scenario.id}`);
+      await page.waitForSelector(`#presetVariables input[data-variable="${scenario.variable}"]`);
+      const prefilled = await page.$eval(`#presetVariables input[data-variable="${scenario.variable}"]`, (input) => input.value);
+      assert.ok(prefilled.length > 0, `${scenario.id} example variables should prefill`);
+      assert.equal(await page.$eval('#updatePresetButton', (button) => button.disabled), true);
+      await page.click('#applyPresetButton');
+      await page.waitForFunction(() => document.querySelector('#presetStatus').textContent.startsWith('已套用'));
+      const applied = await page.evaluate(() => ({
+        moduleId: document.querySelector('#moduleSelect').value,
+        workflowId: document.querySelector('#workflowSelect').value,
+        resolution: document.querySelector('#resolutionInput').value,
+        prompt: document.querySelector('#promptInput').value,
+        status: document.querySelector('#presetStatus').textContent,
+      }));
+      assert.equal(applied.moduleId, `scenario-${scenario.id}`);
+      assert.equal(applied.workflowId, `module-${scenario.id}`);
+      assert.equal(applied.resolution, scenario.resolution);
+      assert.ok(applied.prompt.includes(prefilled), applied.prompt);
+      assert.equal(applied.status.includes('尚未填入'), false, applied.status);
+
+      await page.$eval('#durationInput', (input) => { input.value = '2'; });
+      await page.click('#generateButton');
+      await page.waitForFunction((count) => document.querySelectorAll('.video-card').length === count, { timeout: 30_000 }, index + 1);
+      const stored = (await fetch(`${origin}/api/videos`).then((response) => response.json()))
+        .find((item) => item.moduleId === `scenario-${scenario.id}`);
+      assert.ok(stored, `${scenario.id} video should be stored`);
+      assert.equal(stored.presetId, `module:${scenario.id}`);
+      const motion = await measureVideoMotion(page, `${origin}${stored.previewUrl}`);
+      assert.equal(`${motion.width}x${motion.height}`, scenario.resolution);
+      assert.ok(motion.brightness > 12, `${scenario.id} video should not be black: ${JSON.stringify(motion)}`);
+      assert.ok(motion.difference > 2, `${scenario.id} video should show motion: ${JSON.stringify(motion)}`);
+      results.push({ id: scenario.id, fileName: stored.fileName, ...motion });
+    }
+    const pageScreenshotPath = path.join(outputDir, 'scenario-modules-page.png');
+    await page.screenshot({ path: pageScreenshotPath, fullPage: true });
+    return { results, pageScreenshotPath };
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   await ensureFixtures();
   const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-'));
@@ -402,6 +496,7 @@ async function main() {
     outputDir: managedOutputDir,
     dataDir,
     workflowsDir,
+    modulesDir: path.join(repoRoot, 'modules'),
     comfyUIWorkflowPath: '',
   });
   const address = app.server.address();
@@ -421,6 +516,7 @@ async function main() {
     }
     const presetResult = await runPresetScenario(browser, origin, managedOutputDir);
     const workflowResult = await runWorkflowScenario(browser, origin, managedOutputDir);
+    const scenarioModulesResult = await runScenarioModulesScenario(browser, origin, managedOutputDir);
 
     const report = {
       generatedAt: new Date().toISOString(),
@@ -438,6 +534,10 @@ async function main() {
         referenceFramePath: path.relative(repoRoot, result.referenceFramePath),
       })),
       workflowScenario: workflowResult,
+      scenarioModules: {
+        results: scenarioModulesResult.results,
+        pageScreenshotPath: path.relative(repoRoot, scenarioModulesResult.pageScreenshotPath),
+      },
       presetScenario: {
         ...presetResult,
         pageScreenshotPath: path.relative(repoRoot, presetResult.pageScreenshotPath),

@@ -40,6 +40,7 @@ async function main() {
     outputDir: managedOutputDir,
     dataDir: path.join(managedOutputDir, 'app-data'),
     workflowsDir: path.join(managedOutputDir, 'no-workflows'),
+    modulesDir: path.join(managedOutputDir, 'no-modules'),
     ffmpegCommand: [path.join(managedOutputDir, 'missing-ffmpeg.exe')],
     maxVideoUploadBytes: 1024,
   });
@@ -559,6 +560,7 @@ async function main() {
     let comfyRunning = false;
     let comfyFinished = false;
     let comfyPromptCount = 0;
+    let mainPromptAssigned = false;
     let comfyCancelRequested = false;
     let comfyCancelPayload;
     const comfyServer = http.createServer(async (request, response) => {
@@ -574,8 +576,10 @@ async function main() {
         comfyPromptCount += 1;
         comfyWorkflow = JSON.parse(body).prompt;
         comfyWorkflows.push(comfyWorkflow);
+        const isMainPrompt = !mainPromptAssigned && JSON.stringify(comfyWorkflow).includes('本機 ComfyUI 測試');
+        if (isMainPrompt) mainPromptAssigned = true;
         response.end(JSON.stringify({
-          prompt_id: comfyPromptCount === 1 ? 'comfy-prompt-123' : 'comfy-prompt-cancel',
+          prompt_id: isMainPrompt ? 'comfy-prompt-123' : 'comfy-prompt-cancel',
           number: comfyPromptCount,
         }));
       } else if (request.url === '/queue') {
@@ -662,6 +666,48 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
     }));
     await fs.writeFile(path.join(workflowsDir, 'broken-meta.vf.json'), JSON.stringify({ fps: ['fast'] }));
     await fs.writeFile(path.join(workflowsDir, 'invalid id!.json'), '{}');
+    const modulesDir = path.join(comfyOutputDir, 'modules');
+    const demoModuleDir = path.join(modulesDir, 'demo-dance');
+    await fs.mkdir(demoModuleDir, { recursive: true });
+    await fs.writeFile(path.join(demoModuleDir, 'preview.js'), 'export function renderFrame() {}\n');
+    await fs.writeFile(path.join(demoModuleDir, 'notes.txt'), 'not served');
+    await fs.writeFile(path.join(demoModuleDir, 'workflow.json'), JSON.stringify({
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+      '2': { class_type: 'Wan22ImageToVideoLatent', inputs: { width: '{{width}}', height: '{{height}}', length: '{{frames}}' } },
+      '3': { class_type: 'SaveWEBM', inputs: { fps: '{{fps}}' } },
+    }));
+    await fs.writeFile(path.join(demoModuleDir, 'module.json'), JSON.stringify({
+      id: 'demo-dance',
+      name: '示範舞蹈',
+      description: '測試用場景模組',
+      version: '1.0.0',
+      tags: ['人物', '舞蹈'],
+      canvas: { entry: 'preview.js', tagline: '舞蹈預覽' },
+      workflow: {
+        file: 'workflow.json',
+        resolutions: ['1280x704', '704x1280'],
+        allowCustomResolution: false,
+        fps: [24],
+        minDuration: 2,
+        maxDuration: 5,
+        defaults: { resolution: '1280x704', fps: 24, duration: 5 },
+      },
+      preset: {
+        promptTemplate: '{dancer} 在舞台上跳{style}',
+        negativePrompt: 'nsfw',
+        seedMode: 'fixed',
+        seed: 2026,
+        settings: { resolution: '1280x704', fps: 24, duration: 5 },
+      },
+      safety: { requiresPersonConsent: true, notes: '使用真人照片需取得本人同意。' },
+    }));
+    await fs.mkdir(path.join(modulesDir, '_shared'));
+    await fs.mkdir(path.join(modulesDir, 'wrong-id'));
+    await fs.writeFile(path.join(modulesDir, 'wrong-id', 'module.json'), JSON.stringify({ id: 'other', name: 'x' }));
+    await fs.mkdir(path.join(modulesDir, 'missing-canvas'));
+    await fs.writeFile(path.join(modulesDir, 'missing-canvas', 'module.json'), JSON.stringify({
+      id: 'missing-canvas', name: '缺檔模組', canvas: { entry: 'nope.js' },
+    }));
     const workflowText = JSON.stringify({
       '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
       '2': { class_type: 'ModelLoader', inputs: { model: '{{model_id}}' } },
@@ -677,6 +723,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       outputDir: comfyOutputDir,
       dataDir: path.join(comfyOutputDir, 'app-data'),
       workflowsDir,
+      modulesDir,
       ffmpegCommand: [process.execPath, fakeFfmpegPath],
       comfyUIUrl: comfyOrigin,
       comfyUIWorkflowPath: workflowPath,
@@ -687,10 +734,69 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       const comfyRuntime = await fetch(`${comfyAppOrigin}/api/inference/runtime`).then((response) => response.json());
       assert.equal(comfyRuntime.comfyUI.available, true);
       assert.equal(comfyRuntime.comfyUI.workflowConfigured, true);
-      assert.equal(comfyRuntime.comfyUI.workflowCount, 4);
+      assert.equal(comfyRuntime.comfyUI.workflowCount, 5);
+
+      // Scenario modules: discovery, errors, assets, workflow registration and built-in presets.
+      const scenarioModules = await fetch(`${comfyAppOrigin}/api/scenario-modules`).then((response) => response.json());
+      assert.deepEqual(scenarioModules.map((item) => item.id).sort(), ['demo-dance', 'missing-canvas', 'wrong-id']);
+      const demoModule = scenarioModules.find((item) => item.id === 'demo-dance');
+      assert.equal(demoModule.error, '');
+      assert.equal(demoModule.workflowId, 'module-demo-dance');
+      assert.equal(demoModule.presetId, 'module:demo-dance');
+      assert.equal(demoModule.canvas.url, '/scenario-modules/demo-dance/preview.js');
+      assert.equal(demoModule.canvas.moduleId, 'scenario-demo-dance');
+      assert.equal(demoModule.safety.requiresPersonConsent, true);
+      assert.equal('manifestPath' in demoModule, false);
+      assert.match(scenarioModules.find((item) => item.id === 'wrong-id').error, /資料夾名稱/);
+      assert.match(scenarioModules.find((item) => item.id === 'missing-canvas').error, /nope\.js/);
+      const previewAsset = await fetch(`${comfyAppOrigin}/scenario-modules/demo-dance/preview.js`);
+      assert.equal(previewAsset.status, 200);
+      assert.match(previewAsset.headers.get('content-type'), /javascript/);
+      assert.equal((await fetch(`${comfyAppOrigin}/scenario-modules/demo-dance/notes.txt`)).status, 404);
+      assert.equal((await fetch(`${comfyAppOrigin}/scenario-modules/demo-dance/..%2Fwrong-id%2Fmodule.json`)).status, 404);
+      assert.equal((await fetch(`${comfyAppOrigin}/scenario-modules/Demo/preview.js`)).status, 404);
+      const moduleCapabilities = await fetch(`${comfyAppOrigin}/api/capabilities?workflowId=module-demo-dance`).then((response) => response.json());
+      assert.deepEqual(moduleCapabilities.fps, [24]);
+      assert.deepEqual(moduleCapabilities.duration, { min: 2, max: 5 });
+      const comfyPresets = await fetch(`${comfyAppOrigin}/api/presets`).then((response) => response.json());
+      const modulePreset = comfyPresets.find((preset) => preset.id === 'module:demo-dance');
+      assert.equal(modulePreset.builtIn, true);
+      assert.equal(modulePreset.name, '示範舞蹈');
+      assert.equal(modulePreset.workflowId, 'module-demo-dance');
+      assert.equal(modulePreset.moduleId, 'scenario-demo-dance');
+      assert.deepEqual(modulePreset.variables, ['dancer', 'style']);
+      const exportedComfyPresets = await fetch(`${comfyAppOrigin}/api/presets/export`).then((response) => response.json());
+      assert.equal(exportedComfyPresets.presets.some((preset) => preset.id === 'module:demo-dance'), false);
+      const editBuiltIn = await fetch(`${comfyAppOrigin}/api/presets/module:demo-dance`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'x' }),
+      });
+      assert.equal(editBuiltIn.status, 409);
+      assert.equal((await fetch(`${comfyAppOrigin}/api/presets/module:demo-dance`, { method: 'DELETE' })).status, 409);
+      const moduleJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '示範舞者跳街舞',
+          presetId: 'module:demo-dance',
+          workflowId: 'module-demo-dance',
+          settings: { resolution: '704x1280', fps: 24, duration: 5 },
+        }),
+      }).then((response) => response.json());
+      assert.equal(moduleJob.workflowId, 'module-demo-dance');
+      assert.equal(moduleJob.presetId, 'module:demo-dance');
+      assert.deepEqual(comfyWorkflows.at(-1)['2'].inputs, { width: 704, height: 1280, length: 121 });
+      assert.equal(comfyWorkflows.at(-1)['3'].inputs.fps, 24);
+      await fs.rm(moduleJob.manifestPath);
 
       const workflows = await fetch(`${comfyAppOrigin}/api/workflows`).then((response) => response.json());
-      assert.deepEqual(workflows.map((workflow) => workflow.id), ['default', 'broken-meta', 'needs-image', 'wan-t2v']);
+      assert.equal(workflows[0].id, 'default');
+      assert.deepEqual(
+        workflows.map((workflow) => workflow.id).sort(),
+        ['broken-meta', 'default', 'module-demo-dance', 'needs-image', 'wan-t2v'],
+      );
+      assert.equal(workflows.find((workflow) => workflow.id === 'module-demo-dance').scenarioModuleId, 'demo-dance');
       assert.equal(workflows[0].isDefault, true);
       assert.match(workflows.find((workflow) => workflow.id === 'broken-meta').error, /fps/);
       const wanWorkflow = workflows.find((workflow) => workflow.id === 'wan-t2v');
@@ -894,7 +1000,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(reproduciblePayload),
       }).then((response) => response.json());
-      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyJob.submittedWorkflow);
 
       const rerunResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
       assert.equal(rerunResponse.status, 201);
@@ -903,7 +1009,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       assert.equal(rerunJob.seed, 42);
       assert.equal(rerunJob.status, 'queued');
       assert.deepEqual(rerunJob.warnings, []);
-      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyJob.submittedWorkflow);
 
       // Batches: prompts x seeds, per-item failures isolated.
       const postBatch = (payload) => fetch(`${comfyAppOrigin}/api/inference/batches`, {
@@ -959,7 +1065,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
         .then((response) => response.json());
       assert.equal(changedRerun.warnings.length, 1);
       assert.match(changedRerun.warnings[0], /工作流已變更/);
-      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyJob.submittedWorkflow);
 
       await fs.rm(path.join(comfyOutputDir, 'inference-jobs', 'sources', `${sourceImageSha256}.png`));
       const missingSourceRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
@@ -988,7 +1094,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
         assert.equal(deliveredItem.reproduction.type, 'comfyui');
         assert.equal(deliveredItem.reproduction.job.seed, 42);
         assert.equal('manifestPath' in deliveredItem.reproduction.job, false);
-        assert.deepEqual(deliveredItem.reproduction.job.submittedWorkflow, comfyWorkflows[0]);
+        assert.deepEqual(deliveredItem.reproduction.job.submittedWorkflow, comfyJob.submittedWorkflow);
       }
       assert.equal(await fs.readFile(path.join(delivery.deliveryPath, 'sources', `${sourceImageSha256}.png`), 'utf8'), 'hello');
       await fs.rm(sourceSnapshotPath);
@@ -1003,7 +1109,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       const replayed = await replayResponse.json();
       assert.equal(replayed.rerunOf, comfyJob.id);
       assert.equal(replayed.seed, 42);
-      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyJob.submittedWorkflow);
       assert.equal(await fs.readFile(sourceSnapshotPath, 'utf8'), 'hello');
 
       const canvasDelivery = await postDelivery({ fileNames: ['fail-me.webm'] }).then((response) => response.json());

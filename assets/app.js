@@ -475,7 +475,11 @@
   }
 
   function syncCustomResolutionFields() {
-    ui.customResolutionFields.hidden = ui.resolutionInput.value !== 'custom';
+    const isCustom = ui.resolutionInput.value === 'custom';
+    ui.customResolutionFields.hidden = !isCustom;
+    // Hidden fields still take part in form validation unless disabled, which would silently block "generate".
+    ui.customWidthInput.disabled = !isCustom;
+    ui.customHeightInput.disabled = !isCustom;
   }
 
   function setResolutionValue(value) {
@@ -1136,7 +1140,8 @@
 
   function describePreset(preset) {
     const scope = [preset.client, preset.project].filter(Boolean).join(' / ');
-    return scope ? `${scope}｜${preset.name}` : preset.name;
+    const label = scope ? `${scope}｜${preset.name}` : preset.name;
+    return preset.builtIn ? `［場景模組］${label}` : label;
   }
 
   function syncPresetUi() {
@@ -1145,8 +1150,10 @@
     [ui.savePresetButton, ui.exportPresetsButton, ui.importPresetsButton].forEach((button) => {
       button.disabled = !hasBackend;
     });
-    [ui.applyPresetButton, ui.updatePresetButton, ui.deletePresetButton].forEach((button) => {
-      button.disabled = !hasBackend || !preset;
+    ui.applyPresetButton.disabled = !hasBackend || !preset;
+    [ui.updatePresetButton, ui.deletePresetButton].forEach((button) => {
+      button.disabled = !hasBackend || !preset || preset.builtIn === true;
+      button.title = preset?.builtIn ? '場景模組內建的預設不可修改；可另存為新預設。' : '';
     });
     renderPresetVariables(preset);
   }
@@ -1165,6 +1172,8 @@
     const previousValues = Object.fromEntries(
       [...ui.presetVariables.querySelectorAll('input')].map((input) => [input.dataset.variable, input.value]),
     );
+    const exampleValues = window.VedioFactory.scenarioModules
+      ?.find((item) => item.id === preset?.scenarioModuleId)?.example?.variables ?? {};
     ui.presetVariables.replaceChildren(...variables.map((name) => {
       const label = document.createElement('label');
       label.textContent = `變數 {${name}}`;
@@ -1172,7 +1181,7 @@
       input.type = 'text';
       input.maxLength = 1000;
       input.dataset.variable = name;
-      input.value = previousValues[name] ?? '';
+      input.value = previousValues[name] || exampleValues[name] || '';
       label.append(input);
       return label;
     }));
@@ -1515,6 +1524,15 @@
       return null;
     }
     const seed = readSeedSetting();
+    const scenarioModuleId = getSelectedWorkflow()?.scenarioModuleId;
+    const scenarioModule = window.VedioFactory.scenarioModules?.find((item) => item.id === scenarioModuleId);
+    if (file && scenarioModule?.safety?.requiresPersonConsent) {
+      const notice = scenarioModule.safety.notes || '使用真人照片產生影片前，必須取得照片中人物的同意。';
+      if (!window.confirm(`${notice}\n\n確認已取得照片中人物的同意後再繼續？`)) {
+        setInferenceStatus('已取消：尚未確認照片人物同意。');
+        return null;
+      }
+    }
 
     ui.workflowCheckButton.disabled = true;
     try {
