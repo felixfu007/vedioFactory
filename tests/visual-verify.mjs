@@ -251,6 +251,7 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
     await page.waitForSelector('#presetVariables input[data-variable="product"]');
     await page.type('#presetVariables input[data-variable="product"]', '新款耳機');
     await page.click('#applyPresetButton');
+    await page.waitForFunction(() => document.querySelector('#presetStatus').textContent.startsWith('已套用'));
     const applied = await page.evaluate(() => ({
       prompt: document.querySelector('#promptInput').value,
       story: document.querySelector('#storyInput').value,
@@ -302,11 +303,73 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
   }
 }
 
+async function runWorkflowScenario(browser, origin, managedOutputDir) {
+  await resetDirectory(managedOutputDir);
+  const page = await browser.newPage();
+  try {
+    await page.goto(origin, { waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 2);
+    const optionValues = (selector) => page.$$eval(`${selector} option`, (options) => options.map((option) => option.value));
+    assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');
+    assert.ok((await optionValues('#resolutionInput')).includes('custom'));
+
+    await page.select('#workflowSelect', 'z-wan');
+    assert.deepEqual(await optionValues('#resolutionInput'), ['832x480']);
+    assert.deepEqual(await optionValues('#fpsInput'), ['16']);
+    assert.equal(await page.$eval('#durationInput', (input) => input.max), '4');
+    assert.match(await page.$eval('#capabilityHint', (hint) => hint.textContent), /不支援自訂解析度/);
+    assert.match(await page.$eval('#workflowSelect', (select) => select.selectedOptions[0].textContent), /Wan 原生測試/);
+    assert.match(await page.$eval('#workflowDetails', (details) => details.textContent), /z-wan.json/);
+
+    await page.select('#workflowSelect', 'a-open');
+    await page.select('#resolutionInput', 'custom');
+    assert.equal(await page.$eval('#customResolutionFields', (fields) => fields.hidden), false);
+    await page.$eval('#customWidthInput', (input) => { input.value = '1000'; });
+    await page.$eval('#customHeightInput', (input) => { input.value = '600'; });
+    await page.$eval('#durationInput', (input) => { input.value = '2'; });
+    await page.type('#promptInput', '自訂解析度測試');
+    await page.click('#generateButton');
+    await page.waitForFunction(() => document.querySelectorAll('.video-card').length === 1, { timeout: 30_000 });
+    const [stored] = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(stored.resolution, '1000x600');
+    assert.equal(stored.width, 1000);
+    assert.equal(stored.height, 600);
+
+    await page.$eval('#customWidthInput', (input) => { input.value = '1001'; });
+    await page.click('#generateButton');
+    assert.equal(await page.$eval('#customWidthInput', (input) => input.validity.valid), false);
+    assert.equal(await page.$$eval('.video-card', (cards) => cards.length), 1);
+    return { customResolution: stored.resolution };
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   await ensureFixtures();
   const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-'));
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-visual-data-'));
-  const app = await startServer({ port: 0, host: '127.0.0.1', outputDir: managedOutputDir, dataDir });
+  const workflowsDir = path.join(dataDir, 'workflows');
+  await fs.mkdir(workflowsDir);
+  const sampleWorkflow = JSON.stringify({ '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } } });
+  await fs.writeFile(path.join(workflowsDir, 'a-open.json'), sampleWorkflow);
+  await fs.writeFile(path.join(workflowsDir, 'z-wan.json'), sampleWorkflow);
+  await fs.writeFile(path.join(workflowsDir, 'z-wan.vf.json'), JSON.stringify({
+    name: 'Wan 原生測試',
+    resolutions: ['832x480'],
+    allowCustomResolution: false,
+    fps: [16],
+    maxDuration: 4,
+    defaults: { duration: 2 },
+  }));
+  const app = await startServer({
+    port: 0,
+    host: '127.0.0.1',
+    outputDir: managedOutputDir,
+    dataDir,
+    workflowsDir,
+    comfyUIWorkflowPath: '',
+  });
   const address = app.server.address();
   const origin = `http://127.0.0.1:${address.port}`;
   const chromiumPath = await resolveChromiumPath();
@@ -323,6 +386,7 @@ async function main() {
       results.push(await runScenario(browser, origin, scenario, managedOutputDir));
     }
     const presetResult = await runPresetScenario(browser, origin, managedOutputDir);
+    const workflowResult = await runWorkflowScenario(browser, origin, managedOutputDir);
 
     const report = {
       generatedAt: new Date().toISOString(),
@@ -339,6 +403,7 @@ async function main() {
         actualFramePath: path.relative(repoRoot, result.actualFramePath),
         referenceFramePath: path.relative(repoRoot, result.referenceFramePath),
       })),
+      workflowScenario: workflowResult,
       presetScenario: {
         ...presetResult,
         pageScreenshotPath: path.relative(repoRoot, presetResult.pageScreenshotPath),

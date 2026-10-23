@@ -129,20 +129,11 @@
               </label>
               <label>
                 FPS
-                <select id="fpsInput">
-                  <option value="12">12</option>
-                  <option value="24" selected>24</option>
-                  <option value="30">30</option>
-                </select>
+                <select id="fpsInput"></select>
               </label>
               <label>
                 解析度
-                <select id="resolutionInput">
-                  <option value="1280x720" selected>1280 × 720</option>
-                  <option value="1920x1080">1920 × 1080</option>
-                  <option value="1080x1080">1080 × 1080</option>
-                  <option value="720x1280">720 × 1280</option>
-                </select>
+                <select id="resolutionInput"></select>
               </label>
               <label>
                 品質
@@ -161,6 +152,17 @@
                 <input id="captionInput" type="range" min="0" max="100" value="65" />
               </label>
             </div>
+            <div id="customResolutionFields" class="parameter-grid" hidden>
+              <label>
+                自訂寬度
+                <input id="customWidthInput" type="number" step="8" min="256" max="3840" value="1280" />
+              </label>
+              <label>
+                自訂高度
+                <input id="customHeightInput" type="number" step="8" min="256" max="3840" value="720" />
+              </label>
+            </div>
+            <p id="capabilityHint" class="hint"></p>
             <button id="generateButton" type="submit" class="primary">生成影片</button>
             <p id="generationStatus" class="status-text">尚未開始生成。</p>
           </form>
@@ -169,6 +171,11 @@
         <div class="panel">
           <h2>4. 本機 ComfyUI 推論</h2>
           <div id="inferenceRuntime" class="module-details"></div>
+          <label>
+            ComfyUI 工作流
+            <select id="workflowSelect"></select>
+          </label>
+          <p id="workflowDetails" class="hint">尚未載入工作流。</p>
           <label>
             影片模型建議
             <select id="videoModelSelect"></select>
@@ -273,6 +280,7 @@
       </article>
     </template>
 
+    <script src="./assets/capabilities.js" defer></script>
     <script src="./assets/app.js" defer></script>
     <script src="./assets/modules.js" defer></script>
   </body>

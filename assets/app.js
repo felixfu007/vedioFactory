@@ -1,4 +1,5 @@
 (() => {
+  const Capabilities = window.VedioFactoryCapabilities;
   const modules = [];
   const qualityBitrates = {
     draft: 1_200_000,
@@ -24,6 +25,8 @@
     modelCatalog: null,
     presets: [],
     activePresetId: '',
+    workflows: [],
+    capabilities: Capabilities.BASE_CAPABILITIES,
     libraryFilter: {
       client: '',
       project: '',
@@ -134,6 +137,12 @@
     ui.importPresetsButton = document.querySelector('#importPresetsButton');
     ui.importPresetsInput = document.querySelector('#importPresetsInput');
     ui.libraryClientFilter = document.querySelector('#libraryClientFilter');
+    ui.customResolutionFields = document.querySelector('#customResolutionFields');
+    ui.customWidthInput = document.querySelector('#customWidthInput');
+    ui.customHeightInput = document.querySelector('#customHeightInput');
+    ui.capabilityHint = document.querySelector('#capabilityHint');
+    ui.workflowSelect = document.querySelector('#workflowSelect');
+    ui.workflowDetails = document.querySelector('#workflowDetails');
     ui.libraryProjectFilter = document.querySelector('#libraryProjectFilter');
   }
 
@@ -234,7 +243,7 @@
       `GPU：${runtime.gpu?.detected ? `${runtime.gpu.name || 'NVIDIA'} / ${runtime.gpu.memoryTotal || '未知 VRAM'}` : '尚未偵測到 nvidia-smi'}`,
       `模型目錄：${runtime.modelDir}`,
       `ComfyUI：${runtime.comfyUI?.available ? `已連線 (${runtime.comfyUI.url})` : `未連線 (${runtime.comfyUI?.error || runtime.comfyUI?.url || '未設定'})`}`,
-      `API 工作流：${runtime.comfyUI?.workflowConfigured ? runtime.comfyUI.workflowPath : '尚未設定 VEDIO_FACTORY_COMFYUI_WORKFLOW'}`,
+      `API 工作流：${runtime.comfyUI?.workflowCount ? `${runtime.comfyUI.workflowCount} 個` : '尚未設定（將 API JSON 放入 workflows 資料夾）'}`,
       `方向：${runtime.provider}`,
     ];
 
@@ -442,10 +451,134 @@
     ctx.restore();
   }
 
+  function syncCustomResolutionFields() {
+    ui.customResolutionFields.hidden = ui.resolutionInput.value !== 'custom';
+  }
+
+  function setResolutionValue(value) {
+    if ([...ui.resolutionInput.options].some((option) => option.value === value && value !== 'custom')) {
+      ui.resolutionInput.value = value;
+    } else if (state.capabilities.customResolution.enabled && Capabilities.isResolutionAllowed(value, state.capabilities)) {
+      const size = Capabilities.parseResolution(value);
+      ui.resolutionInput.value = 'custom';
+      ui.customWidthInput.value = String(size.width);
+      ui.customHeightInput.value = String(size.height);
+    } else {
+      syncCustomResolutionFields();
+      return false;
+    }
+    syncCustomResolutionFields();
+    return true;
+  }
+
+  function readResolution() {
+    if (ui.resolutionInput.value !== 'custom') {
+      return ui.resolutionInput.value || state.capabilities.defaults.resolution;
+    }
+    const resolution = `${Number(ui.customWidthInput.value)}x${Number(ui.customHeightInput.value)}`;
+    if (!Capabilities.isResolutionAllowed(resolution, state.capabilities)) {
+      throw new Error(`自訂解析度無效：${Capabilities.describeCustomRules(state.capabilities.customResolution)}。`);
+    }
+    return resolution;
+  }
+
+  function renderCapabilities(capabilities) {
+    let previousResolution = ui.resolutionInput.value;
+    if (previousResolution === 'custom') {
+      previousResolution = `${Number(ui.customWidthInput.value)}x${Number(ui.customHeightInput.value)}`;
+    }
+    const previousFps = Number(ui.fpsInput.value);
+    const previousDuration = Number(ui.durationInput.value);
+    state.capabilities = capabilities;
+
+    ui.resolutionInput.replaceChildren(...capabilities.resolutions.map((item) => new Option(item.label, item.value)));
+    const rules = capabilities.customResolution;
+    if (rules.enabled) ui.resolutionInput.append(new Option('自訂…', 'custom'));
+    [ui.customWidthInput, ui.customHeightInput].forEach((input) => {
+      input.step = String(rules.multiple);
+      input.min = String(rules.minSize);
+    });
+    ui.customWidthInput.max = String(rules.maxWidth);
+    ui.customHeightInput.max = String(rules.maxHeight);
+    if (!setResolutionValue(previousResolution)) setResolutionValue(capabilities.defaults.resolution);
+
+    ui.fpsInput.replaceChildren(...capabilities.fps.map((value) => new Option(String(value), String(value))));
+    ui.fpsInput.value = String(capabilities.fps.includes(previousFps) ? previousFps : capabilities.defaults.fps);
+
+    const { min, max } = capabilities.duration;
+    ui.durationInput.min = String(min);
+    ui.durationInput.max = String(max);
+    if (!Number.isInteger(previousDuration) || previousDuration < min || previousDuration > max) {
+      ui.durationInput.value = String(capabilities.defaults.duration);
+    }
+
+    ui.capabilityHint.textContent = [
+      `長度 ${min}–${max} 秒`,
+      `FPS ${capabilities.fps.join('／')}`,
+      rules.enabled ? `自訂解析度：${Capabilities.describeCustomRules(rules)}` : '不支援自訂解析度',
+    ].join('；');
+  }
+
+  function getSelectedWorkflow() {
+    return state.workflows.find((workflow) => workflow.id === ui.workflowSelect.value) || null;
+  }
+
+  function selectWorkflow() {
+    const workflow = getSelectedWorkflow();
+    if (!workflow) {
+      ui.workflowDetails.textContent = state.backend.available
+        ? '尚未設定工作流：將 ComfyUI 匯出的 API JSON 放入 workflows 資料夾後重新整理頁面。'
+        : '需要本機後端才能使用 ComfyUI 工作流。';
+      renderCapabilities(Capabilities.BASE_CAPABILITIES);
+      return;
+    }
+    if (workflow.error) {
+      ui.workflowDetails.textContent = workflow.error;
+      renderCapabilities(Capabilities.BASE_CAPABILITIES);
+      return;
+    }
+    ui.workflowDetails.textContent = [
+      workflow.description,
+      workflow.videoModelIds.length ? `適用模型：${workflow.videoModelIds.join('、')}` : '',
+      workflow.requiresSourceImage ? '需要來源圖片' : '',
+      `檔案：${workflow.workflowPath}`,
+    ].filter(Boolean).join('｜');
+    if (workflow.videoModelIds.length && !workflow.videoModelIds.includes(ui.videoModelSelect.value)) {
+      setSelectValue(ui.videoModelSelect, workflow.videoModelIds[0]);
+    }
+    renderCapabilities(workflow.capabilities);
+  }
+
+  async function loadWorkflows() {
+    if (!state.backend.available) {
+      ui.workflowSelect.replaceChildren(new Option('（需要本機後端）', ''));
+      ui.workflowSelect.disabled = true;
+      selectWorkflow();
+      return;
+    }
+    try {
+      state.workflows = await fetchJson('/api/workflows', { headers: {} });
+    } catch (error) {
+      console.error(error);
+      state.workflows = [];
+      ui.workflowDetails.textContent = `載入工作流失敗：${error.message}`;
+    }
+    const selected = ui.workflowSelect.value;
+    ui.workflowSelect.replaceChildren(...(state.workflows.length
+      ? state.workflows.map((workflow) => new Option(
+        `${workflow.name}${workflow.isDefault ? '（預設）' : ''}${workflow.error ? '（設定錯誤）' : ''}`,
+        workflow.id,
+      ))
+      : [new Option('（尚未設定工作流）', '')]));
+    ui.workflowSelect.disabled = state.workflows.length === 0;
+    if (state.workflows.some((workflow) => workflow.id === selected)) ui.workflowSelect.value = selected;
+    selectWorkflow();
+  }
+
   function gatherSpec(overrides = {}) {
-    const duration = Math.max(2, Number(ui.durationInput.value) || 6);
-    const fps = Math.max(12, Number(ui.fpsInput.value) || 24);
-    const resolution = ui.resolutionInput.value || '1280x720';
+    const duration = Number(ui.durationInput.value) || state.capabilities.defaults.duration;
+    const fps = Number(ui.fpsInput.value) || state.capabilities.defaults.fps;
+    const resolution = readResolution();
     const size = resolutionToSize(resolution);
     return {
       id: crypto.randomUUID(),
@@ -1000,12 +1133,13 @@
       negativePrompt: ui.negativePromptInput.value.trim(),
       moduleId: ui.moduleSelect.value,
       videoModelId: ui.videoModelSelect.value,
+      workflowId: ui.workflowSelect.value,
       seedMode,
       seed: readSeedSetting() ?? null,
       settings: {
         duration: Number(ui.durationInput.value),
         fps: Number(ui.fpsInput.value),
-        resolution: ui.resolutionInput.value,
+        resolution: readResolution(),
         quality: ui.qualityInput.value,
         motion: Number(ui.motionInput.value),
         captionStrength: Number(ui.captionInput.value),
@@ -1034,10 +1168,18 @@
     ui.clientInput.value = preset.client || ui.clientInput.value;
     ui.projectInput.value = preset.project || ui.projectInput.value;
     if (setSelectValue(ui.moduleSelect, preset.moduleId)) renderModuleDetails();
+    const workflowMissing = Boolean(preset.workflowId) && !setSelectValue(ui.workflowSelect, preset.workflowId);
+    selectWorkflow();
     setSelectValue(ui.videoModelSelect, preset.videoModelId);
-    ui.durationInput.value = String(preset.settings.duration);
-    setSelectValue(ui.fpsInput, String(preset.settings.fps));
-    setSelectValue(ui.resolutionInput, preset.settings.resolution);
+    const unsupported = [];
+    const { min, max } = state.capabilities.duration;
+    if (preset.settings.duration >= min && preset.settings.duration <= max) {
+      ui.durationInput.value = String(preset.settings.duration);
+    } else {
+      unsupported.push(`長度 ${preset.settings.duration} 秒`);
+    }
+    if (!setSelectValue(ui.fpsInput, String(preset.settings.fps))) unsupported.push(`FPS ${preset.settings.fps}`);
+    if (!setResolutionValue(preset.settings.resolution)) unsupported.push(`解析度 ${preset.settings.resolution}`);
     setSelectValue(ui.qualityInput, preset.settings.quality);
     ui.motionInput.value = String(preset.settings.motion);
     ui.captionInput.value = String(preset.settings.captionStrength);
@@ -1046,9 +1188,11 @@
     syncSeedInput();
     state.activePresetId = preset.id;
     renderProjectOptions();
-    setPresetStatus(missing.length
-      ? `已套用「${preset.name}」，但尚未填入變數：${missing.map((name) => `{${name}}`).join('、')}`
-      : `已套用「${preset.name}」。`);
+    const notes = [];
+    if (missing.length) notes.push(`尚未填入變數：${missing.map((name) => `{${name}}`).join('、')}`);
+    if (workflowMissing) notes.push(`找不到工作流 ${preset.workflowId}，沿用目前工作流`);
+    if (unsupported.length) notes.push(`目前工作流不支援 ${unsupported.join('、')}，已改用可用值`);
+    setPresetStatus(notes.length ? `已套用「${preset.name}」，但${notes.join('；')}。` : `已套用「${preset.name}」。`);
   }
 
   async function savePreset() {
@@ -1177,6 +1321,7 @@
       const workflowCheck = await fetchJson('/api/inference/workflow-check', {
         method: 'POST',
         body: JSON.stringify({
+          workflowId: ui.workflowSelect.value,
           videoModelId: ui.videoModelSelect.value,
           hasSourceImage: Boolean(file),
         }),
@@ -1198,6 +1343,7 @@
           client: spec.client,
           project: spec.project,
           presetId: spec.presetId,
+          workflowId: ui.workflowSelect.value,
           moduleId: spec.moduleId,
           videoModelId: ui.videoModelSelect.value,
           sourceImageDataUrl: spec.sourceImageDataUrl,
@@ -1242,6 +1388,7 @@
       const report = await fetchJson('/api/inference/workflow-check', {
         method: 'POST',
         body: JSON.stringify({
+          workflowId: ui.workflowSelect.value,
           videoModelId: ui.videoModelSelect.value,
           hasSourceImage: Boolean(ui.imageInput.files?.[0]),
         }),
@@ -1618,6 +1765,8 @@
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
     ui.seedModeInput.addEventListener('change', syncSeedInput);
+    ui.workflowSelect.addEventListener('change', selectWorkflow);
+    ui.resolutionInput.addEventListener('change', syncCustomResolutionFields);
     ui.presetSelect.addEventListener('change', () => {
       if (!ui.presetSelect.value) state.activePresetId = '';
       syncPresetUi();
@@ -1642,11 +1791,13 @@
 
   async function initApp() {
     bindUi();
+    renderCapabilities(Capabilities.BASE_CAPABILITIES);
     loadStoredLibrary();
     restoreStoredLibraryPreview();
     renderModuleOptions();
     attachEvents();
     await initBackend();
+    await loadWorkflows();
     await loadPresets();
     syncStorageUi();
     renderLibrary();
