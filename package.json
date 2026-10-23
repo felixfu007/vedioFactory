@@ -8,7 +8,8 @@
     "test": "npm run test:api",
     "test:all": "npm run test:api && npm run test:visual",
     "test:api": "node tests/backend-api.mjs",
-    "test:visual": "node tests/visual-verify.mjs"
+    "test:visual": "node tests/visual-verify.mjs",
+    "examples": "node tools/generate-examples.mjs"
   },
   "repository": {
     "type": "git",

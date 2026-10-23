@@ -7,6 +7,7 @@ RUN npm ci --omit=dev
 
 COPY --chown=node:node server.js index.html ./
 COPY --chown=node:node assets ./assets
+COPY --chown=node:node modules ./modules
 RUN mkdir -p /data/output /data/models /data/app /workflows \
   && chown -R node:node /data
 
