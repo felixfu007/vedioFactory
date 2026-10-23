@@ -62,7 +62,7 @@ npm start
 docker compose up --build -d
 ```
 
-開啟 `http://127.0.0.1:8000`。Compose 將影片輸出、模型參考目錄和參數預設保存在 Docker volumes，`docker compose down` 不會刪除資料；`docker compose down -v` 會刪除這些資料。ComfyUI 模型仍須安裝在主機上的 ComfyUI 模型目錄；`/data/models` 不會自動同步到 ComfyUI。
+開啟 `http://127.0.0.1:8000`。複製 `.env.example` 為 `.env` 並填入主機資料夾後，Docker 版會和 `npm start` 共用同一份影片庫、參數預設與 ComfyUI models 資料夾（從 Civitai 安裝模型時寫入）；未填時改存在 Docker volumes，`docker compose down` 不會刪除資料；`docker compose down -v` 會刪除這些資料。ComfyUI 模型仍須安裝在主機上的 ComfyUI 模型目錄；`/data/models` 不會自動同步到 ComfyUI。
 
 Docker 容器中的 `localhost` 指向容器本身，因此 Compose 使用 `host.docker.internal` 連回 Windows 主機。若要執行推論，ComfyUI 必須允許 Docker 容器連線（例如以 `--listen 0.0.0.0` 啟動），並在 Windows 防火牆限制存取範圍；不要將 ComfyUI 的 8188 埠公開到不可信的網路。若有 API 格式工作流，將它放在專案的 `workflows` 資料夾，並在啟動 Compose 前設定容器內路徑：
 
@@ -72,6 +72,14 @@ docker compose up --build -d
 ```
 
 網站埠只綁定主機的 `127.0.0.1`。若要更改主機埠，例如 8080，先設定 `$env:VEDIO_FACTORY_PORT="8080"` 再執行 Compose。Docker 部署不會替 ComfyUI 安裝模型、節點或 GPU 執行環境。
+
+### 用 Tailscale 從外部連線
+
+```powershell
+tailscale serve --bg --https=8443 http://127.0.0.1:8000
+```
+
+之後在 tailnet 內的裝置開啟 `https://<電腦名稱>.<tailnet>.ts.net:8443`，並把這個主機名稱加入 `.env` 的 `VEDIO_FACTORY_ALLOWED_HOSTS`。請勿使用 `tailscale funnel`：它會公開到整個網際網路，而本服務沒有登入機制。關閉：`tailscale serve --https=8443 off`。
 
 ### 存取保護
 
@@ -103,6 +111,8 @@ vedioFactory 沒有登入機制，因此後端只接受以 `localhost`、`127.0.
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
 | `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | 選用：額外指定一個預設工作流 JSON 的絕對路徑 |
 | `VEDIO_FACTORY_FFMPEG` | `ffmpeg`（PATH） | 選用：ffmpeg 執行檔路徑，用於「轉成 MP4」 |
+| `VEDIO_FACTORY_COMFYUI_MODELS_DIR` | `%USERPROFILE%\ComfyUI\models` | ComfyUI 的 models 資料夾，從 Civitai 安裝模型時寫入 |
+| `VEDIO_FACTORY_CIVITAI_TOKEN` | 空值 | 選用：Civitai API 金鑰，下載需要登入的模型時使用 |
 | `VEDIO_FACTORY_MODULES_DIR` | 專案內 `modules\` | 場景模組資料夾，見「場景模組」 |
 | `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
@@ -129,6 +139,12 @@ npm start
 - **匯出／匯入**：匯出全部預設為 JSON，方便在其他機器或同事間交接；匯入時會先驗證全部內容，任一筆無效就不寫入任何預設，相同 ID 的預設會被覆蓋。
 
 預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
+
+## 從 Civitai 安裝模型
+
+網頁的「從 Civitai 安裝模型」區塊：貼上 civitai.com 的模型網址 → 按「查詢模型」確認名稱、類型、大小、觸發詞與**商用授權** → 按「下載並安裝」。檔案會依類型放進 ComfyUI 的 models 子資料夾（Checkpoint → `checkpoints`、LoRA → `loras` 等，可手動改成 `diffusion_models` 等），下載進度顯示在同一區塊，ComfyUI 不需重啟即可看到新模型。
+
+安全規則：只接受 `.safetensors`（舊式 `.ckpt`／`.pt` 載入時可能執行程式碼）、Civitai 安全掃描須通過、下載後比對 SHA-256、不覆蓋既有檔案、一次只下載一個；不提供自動安裝標示為成人內容、描繪特定真實人物（poi）或涉及未成年人的模型。作者未允許商用的模型會在安裝前提醒。需要登入才能下載的模型，請在 `.env` 設定 `VEDIO_FACTORY_CIVITAI_TOKEN`（Civitai 帳號設定中的 API Key）。
 
 ## 場景模組（跳舞、走秀、健身房）
 

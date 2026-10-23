@@ -347,6 +347,12 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
     assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');
     assert.ok((await optionValues('#resolutionInput')).includes('custom'));
 
+    // Civitai section: a non-Civitai link is refused before anything is downloaded.
+    await page.type('#civitaiUrlInput', 'https://evil.example/models/1');
+    await page.click('#civitaiPreviewButton');
+    await page.waitForFunction(() => document.querySelector('#civitaiStatus').textContent.includes('查詢失敗'));
+    assert.equal(await page.$eval('#civitaiInstallButton', (button) => button.disabled), true);
+
     await page.select('#workflowSelect', 'z-wan');
     assert.deepEqual(await optionValues('#resolutionInput'), ['832x480']);
     assert.deepEqual(await optionValues('#fpsInput'), ['16']);
