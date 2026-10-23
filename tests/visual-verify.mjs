@@ -295,6 +295,15 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
     const filterOptions = await page.$$eval('#libraryProjectFilter option', (options) => options.map((option) => option.value));
     assert.deepEqual(filterOptions, ['', '春季活動']);
 
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.click('#createDeliveryButton');
+    await page.waitForFunction(() => document.querySelector('#deliveryStatus').textContent.includes('已建立交付資料夾（1 部影片）'));
+    const deliveryRoot = path.join(managedOutputDir, 'deliveries', '客戶A', '春季活動');
+    const [deliveryFolder] = await fs.readdir(deliveryRoot);
+    const deliveryManifest = JSON.parse(await fs.readFile(path.join(deliveryRoot, deliveryFolder, 'manifest.json'), 'utf8'));
+    assert.equal(deliveryManifest.items[0].fileName, stored.fileName);
+    assert.equal(deliveryManifest.items[0].reproduction.type, 'canvas');
+
     const pageScreenshotPath = path.join(outputDir, 'preset-page.png');
     await page.screenshot({ path: pageScreenshotPath, fullPage: true });
     return { presetId: preset.id, applied, pageScreenshotPath };
@@ -305,9 +314,34 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
 
 async function runWorkflowScenario(browser, origin, managedOutputDir) {
   await resetDirectory(managedOutputDir);
+  const jobsDir = path.join(managedOutputDir, 'inference-jobs');
+  await fs.mkdir(jobsDir);
+  await fs.writeFile(path.join(jobsDir, 'failed-job.json'), JSON.stringify({
+    id: 'job-failed-1',
+    status: 'failed',
+    createdAt: '2026-10-22T01:00:00.000Z',
+    prompt: '佇列面板測試',
+    seed: 77,
+    client: '客戶Q',
+    project: '佇列',
+    workflowId: 'z-wan',
+    batchId: 'abcdef12-0000-4000-8000-000000000000',
+    batchIndex: 0,
+    error: 'ComfyUI 工作失敗：error',
+    comfyPromptId: 'p-1',
+    submittedWorkflow: { '1': { class_type: 'X', inputs: {} } },
+  }));
   const page = await browser.newPage();
   try {
     await page.goto(origin, { waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => document.querySelectorAll('#jobsTableBody tr').length === 1);
+    const jobRow = await page.$eval('#jobsTableBody tr', (row) => row.textContent);
+    for (const expected of ['失敗', '客戶Q / 佇列', '佇列面板測試', '77', 'z-wan', 'abcdef12 #1', '以相同設定重跑']) {
+      assert.ok(jobRow.includes(expected), `queue row should include ${expected}: ${jobRow}`);
+    }
+    await page.select('#jobStatusFilter', 'active');
+    assert.equal(await page.$eval('#jobsTable', (table) => table.hidden), true);
+    assert.equal(await page.$eval('#jobsEmpty', (empty) => empty.textContent), '沒有符合篩選條件的工作。');
     await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 2);
     const optionValues = (selector) => page.$$eval(`${selector} option`, (options) => options.map((option) => option.value));
     assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');

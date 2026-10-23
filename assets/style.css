@@ -109,6 +109,27 @@ textarea {
   align-content: start;
 }
 
+/* Long local paths (output folder, delivery folder) must wrap instead of widening the page. */
+.layout > *,
+.hero > *,
+.controls-grid > * {
+  min-width: 0;
+}
+
+.hero-status strong,
+.status-text,
+.hint,
+.video-card,
+.catalog-card {
+  overflow-wrap: anywhere;
+}
+
+.video-card,
+.catalog-card,
+.catalog-card > * {
+  min-width: 0;
+}
+
 .status-label,
 .eyebrow {
   color: var(--primary-strong);
@@ -167,6 +188,76 @@ textarea {
   gap: 0.75rem;
 }
 
+.batch-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(151, 171, 196, 0.16);
+  border-radius: 18px;
+  padding: 0.75rem 1rem;
+}
+
+.batch-panel[open] {
+  padding-bottom: 1rem;
+}
+
+.batch-panel summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.jobs-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.jobs-table th,
+.jobs-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(151, 171, 196, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.jobs-table th {
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.jobs-table td.prompt-cell {
+  min-width: 200px;
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+
+.jobs-table .row-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.jobs-table .row-actions button {
+  padding: 0.45rem 0.8rem;
+}
+
+.job-status {
+  white-space: nowrap;
+}
+
+.job-status[data-status="failed"] {
+  color: #ffc5cf;
+}
+
+.job-status[data-status="succeeded"] {
+  color: var(--primary-strong);
+}
+
 .library-filters {
   margin-bottom: 1rem;
 }
@@ -215,7 +306,7 @@ textarea {
 .library-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
 }
 
 .catalog-card {
@@ -250,11 +341,13 @@ textarea {
   background: rgba(6, 16, 28, 0.72);
 }
 
-.video-card video {
+.video-card video,
+.video-card .video-preview {
   width: 100%;
   border-radius: 18px;
   background: black;
   aspect-ratio: 16 / 9;
+  object-fit: contain;
 }
 
 .stats {

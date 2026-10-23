@@ -82,7 +82,12 @@ docker compose up --build -d
 5. 按下「生成影片」
 6. 在下方管理區進行重新命名、剪輯輸出、刪除、重新產出等操作
 
-後端影片庫會以二進位串流保存 WebM，單檔上限為 500 MiB；中斷或超限的上傳不會保留暫存影片。
+後端影片庫會以二進位串流保存影片，單檔上限為 500 MiB；中斷或超限的上傳不會保留暫存影片。
+
+### 影片格式與 MP4 轉檔
+
+- 影片庫支援 WebM、MP4、GIF、WebP。Canvas 模組產生 WebM；ComfyUI 輸出的這四種格式都會匯入（PNG 等單張圖片不會）。GIF／WebP 以圖片預覽，無法在瀏覽器內剪輯。
+- 若本機可執行 ffmpeg（在 PATH 中，或以 `VEDIO_FACTORY_FFMPEG` 指定路徑），非 MP4 影片卡片會出現「轉成 MP4」：以 H.264（yuv420p、CRF 18）＋ AAC 輸出，並保留原影片的參數 metadata（含 seed、客戶／專案）。轉檔一次執行一個。Windows 可從 https://ffmpeg.org/download.html 下載。Docker 映像預設不含 ffmpeg。
 
 ## 環境變數
 
@@ -93,6 +98,7 @@ docker compose up --build -d
 | `VEDIO_FACTORY_DATA_DIR` | `%USERPROFILE%\vedioFactory` | 應用資料目錄；參數預設存於其下的 `presets/` |
 | `VEDIO_FACTORY_COMFYUI_URL` | `http://127.0.0.1:8188` | 本機 ComfyUI HTTP API（僅接受 localhost） |
 | `VEDIO_FACTORY_COMFYUI_WORKFLOW` | 空值 | 選用：額外指定一個預設工作流 JSON 的絕對路徑 |
+| `VEDIO_FACTORY_FFMPEG` | `ffmpeg`（PATH） | 選用：ffmpeg 執行檔路徑，用於「轉成 MP4」 |
 | `VEDIO_FACTORY_WORKFLOWS_DIR` | 專案內 `workflows\` | 多工作流資料夾，見「多工作流與參數規格」 |
 | `HOST` | `127.0.0.1` | 服務綁定位址 |
 | `PORT` | `8000` | 服務埠號 |
@@ -117,6 +123,13 @@ npm start
 - **匯出／匯入**：匯出全部預設為 JSON，方便在其他機器或同事間交接；匯入時會先驗證全部內容，任一筆無效就不寫入任何預設，相同 ID 的預設會被覆蓋。
 
 預設保存在 `VEDIO_FACTORY_DATA_DIR\presets\`（預設 `%USERPROFILE%\vedioFactory\presets\`），不隨輸出資料夾切換而改變。Docker 部署時保存在 `vediofactory-app` volume。
+
+## 批次、工作佇列與交付資料夾
+
+- **批次生成**：「本機 ComfyUI 推論」區展開「批次生成」，每行輸入一個提示詞（留空則用上方提示詞），並設定每個提示詞產生幾個 seed。固定 seed 時依序使用 seed、seed+1…；隨機時每個工作各自產生 seed。單一批次最多 50 個工作，單筆失敗不影響其他工作（`POST /api/inference/batches`）。
+- **工作佇列**：「推論工作佇列」區列出所有工作的狀態、客戶／專案、seed、工作流與批次，可依狀態篩選、取消排隊中的工作，或以相同設定重跑；有進行中工作時每 4 秒自動更新，完成後影片庫會自動重新整理。
+- **交付資料夾**：在影片庫篩選客戶／專案後按「為目前篩選建立交付資料夾」，會建立 `輸出資料夾\deliveries\<客戶>\<專案>\<時間>\`，內含 `videos\`（影片副本）、`sources\`（ComfyUI 來源圖片）與 `manifest.json`（每部影片的 SHA-256、完整參數，以及 ComfyUI 工作的工作流快照與 seed）。
+- **從交付資料夾重新產出**：把交付資料夾放回（或保留在）`輸出資料夾\deliveries\` 底下，呼叫 `POST /api/deliveries/replay`，body 為 `{"manifestPath": "<manifest.json 絕對路徑>", "index": 0}`，即可用 manifest 中保存的工作流快照、seed 與來源圖片重新提交 ComfyUI。Canvas 影片的參數同樣記錄在 manifest，但需在影片庫中重新產出。
 
 ## 多工作流與參數規格
 

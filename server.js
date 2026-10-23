@@ -2,7 +2,7 @@ const http = require('node:http');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
-const { createWriteStream } = require('node:fs');
+const { createReadStream, createWriteStream } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Readable, Transform } = require('node:stream');
@@ -321,7 +321,20 @@ const contentTypes = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
 };
+
+const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.gif', '.webp'];
+const DEFAULT_FFMPEG_COMMAND = [process.env.VEDIO_FACTORY_FFMPEG || 'ffmpeg'];
+const FFMPEG_DETECTION_TTL_MS = 30_000;
+const MAX_BATCH_JOBS = 50;
+const DELIVERIES_DIR_NAME = 'deliveries';
+const DELIVERY_SCHEMA_VERSION = 1;
+const MAX_DELIVERY_ITEMS = 500;
+const MAX_BATCH_SEED_COUNT = 10;
+const VIDEO_EXTENSION_PATTERN = /\.(webm|mp4|gif|webp)$/iu;
 
 function createRequestError(message, statusCode = 400) {
   const error = new Error(message);
@@ -333,6 +346,7 @@ function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(command, args, options, (error, stdout, stderr) => {
       if (error) {
+        error.stderr = stderr;
         reject(error);
         return;
       }
@@ -374,11 +388,29 @@ function sanitizeFileName(fileName) {
   }
 
   const normalized = path.basename(fileName.trim()).replace(/[\\/]+/g, '');
-  if (!normalized.endsWith('.webm')) {
-    throw createRequestError('影片檔名必須以 .webm 結尾。');
+  if (!VIDEO_EXTENSIONS.includes(path.extname(normalized).toLowerCase()) || normalized.length <= 5) {
+    throw createRequestError(`影片檔名必須以 ${VIDEO_EXTENSIONS.join('、')} 結尾。`);
   }
 
   return normalized;
+}
+
+// Keeps Unicode (e.g. Chinese client names) but drops characters Windows forbids in folder names.
+function sanitizeFolderName(value, fallback) {
+  const cleaned = String(value || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, '-')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/[. ]+$/u, '')
+    .slice(0, 60);
+  if (!cleaned || /^\.+$/u.test(cleaned) || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/iu.test(cleaned)) return fallback;
+  return cleaned;
+}
+
+async function hashFile(filePath) {
+  const hash = crypto.createHash('sha256');
+  await pipeline(createReadStream(filePath), hash);
+  return hash.digest('hex');
 }
 
 function sanitizePathSegment(value, fallback = 'item') {
@@ -754,7 +786,7 @@ async function getInferenceRuntime(outputDir, comfyUI = getComfyUIConfig(), work
     guidance: [
       '請在本機啟動 ComfyUI；Docker 部署時使用 host.docker.internal，並透過防火牆限制存取。',
       '將 ComfyUI 匯出的 API 格式工作流 JSON 放入 workflows 資料夾（可附同名 .vf.json 設定檔），或設定 VEDIO_FACTORY_COMFYUI_WORKFLOW。',
-      `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 .webm 影片會複製到 ${outputDir}。`,
+      `模型權重預設放在 ${DEFAULT_MODEL_DIR}；ComfyUI 回傳的 WebM/MP4/GIF/WebP 影片會複製到 ${outputDir}。`,
     ],
   };
 }
@@ -802,7 +834,7 @@ async function collectVideoItems(outputDir) {
   const items = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.webm.json')) continue;
+    if (!entry.isFile() || !VIDEO_EXTENSION_PATTERN.test(entry.name.replace(/\.json$/u, ''))) continue;
     try {
       const metadataPath = path.join(outputDir, entry.name);
       const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
@@ -813,6 +845,7 @@ async function collectVideoItems(outputDir) {
       items.push({
         ...metadata,
         fileName,
+        format: path.extname(fileName).slice(1).toLowerCase(),
         fileSize: stats.size,
         previewUrl: `/api/videos/${encodeURIComponent(fileName)}`,
       });
@@ -830,6 +863,10 @@ function createApp(options = {}) {
   const dataDir = normalizeOutputDir(options.dataDir || DEFAULT_DATA_DIR);
   const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
   const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
+  // [command, ...prefixArgs] so tests can substitute a script run by node.
+  const ffmpegCommand = options.ffmpegCommand || DEFAULT_FFMPEG_COMMAND;
+  let ffmpegDetection = null;
+  let transcodeQueue = Promise.resolve();
   const renameLocks = new Map();
   const inferenceRefreshes = new Map();
   const comfyUI = getComfyUIConfig(options);
@@ -1046,15 +1083,15 @@ function createApp(options = {}) {
       warnings.push('所選模型以圖生影片為主，但工作流沒有 {{source_image}}；請確認它確實支援目前的輸入方式。');
     }
 
-    const videoOutputNodes = nodeSummaries.filter(({ classType }) => /video|webm/iu.test(classType));
+    const videoOutputNodes = nodeSummaries.filter(({ classType }) => /video|webm|animated|gif|mp4/iu.test(classType));
     if (!videoOutputNodes.length) {
-      warnings.push('找不到名稱含 video/webm 的節點，請確認工作流有影片輸出節點。');
+      warnings.push('找不到名稱含 video/webm/animated/gif 的節點，請確認工作流有影片輸出節點。');
     } else {
       const outputText = videoOutputNodes
-        .map(({ id }) => JSON.stringify(workflow[id].inputs))
+        .map(({ id }) => `${workflow[id].class_type} ${JSON.stringify(workflow[id].inputs)}`)
         .join(' ');
-      if (!/webm/iu.test(outputText) && !videoOutputNodes.some(({ classType }) => /webm/iu.test(classType))) {
-        warnings.push('無法從輸出節點設定確認 WebM 格式；目前只有 WebM 會匯入影片庫。');
+      if (!/webm|mp4|h26[45]|gif|webp/iu.test(outputText)) {
+        warnings.push('無法從輸出節點設定確認輸出格式；只有 WebM、MP4、GIF、WebP 會匯入影片庫。');
       }
     }
 
@@ -1189,7 +1226,7 @@ function createApp(options = {}) {
       if (Array.isArray(value)) {
         value.forEach(visit);
       } else if (value && typeof value === 'object') {
-        if (typeof value.filename === 'string' && /\.webm$/iu.test(value.filename)) videos.push(value);
+        if (typeof value.filename === 'string' && VIDEO_EXTENSION_PATTERN.test(value.filename)) videos.push(value);
         Object.values(value).forEach(visit);
       }
     };
@@ -1209,7 +1246,8 @@ function createApp(options = {}) {
       const response = await requestComfyUI(`/view?${query}`, {
         signal: AbortSignal.timeout(120_000),
       });
-      const fileName = sanitizeFileName(`comfyui-${job.id.slice(0, 8)}-${index + 1}.webm`);
+      const extension = path.extname(video.filename).toLowerCase();
+      const fileName = sanitizeFileName(`comfyui-${job.id.slice(0, 8)}-${index + 1}${extension}`);
       const videoPath = path.join(outputDir, fileName);
       const temporaryPath = `${videoPath}.${crypto.randomUUID()}.tmp`;
       let stats;
@@ -1296,7 +1334,7 @@ function createApp(options = {}) {
           job.outputs = await saveComfyVideoOutputs(job, historyEntry);
           job.status = 'succeeded';
           if (!job.outputs.length) {
-            job.guidance = 'ComfyUI 工作已完成，但未找到 .webm 輸出；請確認工作流使用影片輸出節點並輸出 WebM。';
+            job.guidance = 'ComfyUI 工作已完成，但未找到 WebM/MP4/GIF/WebP 輸出；請確認工作流使用影片輸出節點。';
           }
         }
       } else {
@@ -1356,18 +1394,39 @@ function createApp(options = {}) {
     return jobs;
   }
 
+  async function refreshJobOnce(job) {
+    if (!inferenceRefreshes.has(job.id)) {
+      inferenceRefreshes.set(job.id, refreshComfyInferenceJob(job));
+    }
+    try {
+      return await inferenceRefreshes.get(job.id);
+    } finally {
+      inferenceRefreshes.delete(job.id);
+    }
+  }
+
   async function getInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const job = jobs.find((item) => item.id === jobId) || null;
     if (!job?.comfyPromptId) return job;
-    if (!inferenceRefreshes.has(jobId)) {
-      inferenceRefreshes.set(jobId, refreshComfyInferenceJob(job));
+    return refreshJobOnce(job);
+  }
+
+  async function listInferenceJobSummaries({ refresh = false, limit = Infinity } = {}) {
+    const jobs = (await listInferenceJobs()).slice(0, limit);
+    const summaries = [];
+    for (const job of jobs) {
+      if (!refresh || !job.comfyPromptId || !['queued', 'running'].includes(job.status)) {
+        summaries.push(summarizeJob(job));
+        continue;
+      }
+      try {
+        summaries.push(summarizeJob(await refreshJobOnce(job)));
+      } catch (error) {
+        summaries.push({ ...summarizeJob(job), refreshError: error.message });
+      }
     }
-    try {
-      return await inferenceRefreshes.get(jobId);
-    } finally {
-      inferenceRefreshes.delete(jobId);
-    }
+    return summaries;
   }
 
   async function cancelInferenceJob(jobId) {
@@ -1486,7 +1545,65 @@ function createApp(options = {}) {
     }
   }
 
-  async function createInferenceJob(payload) {
+  function summarizeJob(job) {
+    const { submittedWorkflow, workflowPreflight, ...summary } = job;
+    return { ...summary, hasWorkflowSnapshot: Boolean(submittedWorkflow) };
+  }
+
+  async function createInferenceBatch(payload) {
+    if (!isPlainObject(payload)) throw createRequestError('批次資料格式錯誤。');
+    const { prompts: rawPrompts, seeds: rawSeeds, seedCount: rawSeedCount, ...basePayload } = payload;
+    if (rawPrompts !== undefined && (!Array.isArray(rawPrompts) || rawPrompts.some((item) => typeof item !== 'string'))) {
+      throw createRequestError('prompts 必須是字串陣列。');
+    }
+    const cleanedPrompts = (rawPrompts || []).map((item) => item.trim()).filter(Boolean);
+    const prompts = cleanedPrompts.length ? cleanedPrompts : [typeof basePayload.prompt === 'string' ? basePayload.prompt : ''];
+
+    let seeds;
+    if (rawSeeds !== undefined) {
+      if (!Array.isArray(rawSeeds) || !rawSeeds.length || rawSeeds.length > MAX_BATCH_SEED_COUNT) {
+        throw createRequestError(`seeds 必須是 1 至 ${MAX_BATCH_SEED_COUNT} 個 seed 的陣列。`);
+      }
+      seeds = rawSeeds.map(validateSeed);
+    } else {
+      const seedCount = rawSeedCount === undefined ? 1 : Number(rawSeedCount);
+      if (!Number.isInteger(seedCount) || seedCount < 1 || seedCount > MAX_BATCH_SEED_COUNT) {
+        throw createRequestError(`seedCount 必須介於 1 至 ${MAX_BATCH_SEED_COUNT}。`);
+      }
+      const hasBaseSeed = basePayload.seed !== undefined && basePayload.seed !== null && basePayload.seed !== '';
+      // A fixed base seed expands to seed, seed+1, …; otherwise every job draws its own random seed.
+      seeds = Array.from({ length: seedCount }, (_, index) => (
+        hasBaseSeed ? validateSeed(validateSeed(basePayload.seed) + index) : undefined
+      ));
+    }
+    const total = prompts.length * seeds.length;
+    if (total > MAX_BATCH_JOBS) {
+      throw createRequestError(`批次最多 ${MAX_BATCH_JOBS} 個工作（目前 ${prompts.length} 個提示詞 × ${seeds.length} 個 seed）。`);
+    }
+
+    const batchId = crypto.randomUUID();
+    const jobs = [];
+    const errors = [];
+    let batchIndex = 0;
+    for (const prompt of prompts) {
+      for (const seed of seeds) {
+        const index = batchIndex;
+        batchIndex += 1;
+        try {
+          const job = await createInferenceJob({ ...basePayload, prompt, seed }, { batchId, batchIndex: index });
+          jobs.push(summarizeJob(job));
+        } catch (error) {
+          errors.push({ index, prompt, seed: seed ?? null, statusCode: error.statusCode || 500, error: error.message });
+        }
+      }
+    }
+    if (!jobs.length) {
+      throw createRequestError(`批次中所有工作都建立失敗：${errors[0]?.error || '未知錯誤'}`, errors[0]?.statusCode || 400);
+    }
+    return { batchId, total, created: jobs.length, jobs, errors };
+  }
+
+  async function createInferenceJob(payload, batch = null) {
     await ensureOutputDir();
     await ensureInferenceJobDir();
 
@@ -1509,6 +1626,7 @@ function createApp(options = {}) {
       client: inference.client,
       project: inference.project,
       presetId: inference.presetId,
+      ...(batch ? { batchId: batch.batchId, batchIndex: batch.batchIndex } : {}),
       moduleId: inference.moduleId,
       videoModelId: inference.videoModelId,
       settings: inference.settings,
@@ -1574,7 +1692,7 @@ function createApp(options = {}) {
       job.comfyPromptId = submission.prompt_id;
       job.queuePosition = submission.number;
       job.status = 'queued';
-      job.guidance = '已提交至本機 ComfyUI。請確認工作流輸出 .webm，完成後影片會匯入專案資料夾。';
+      job.guidance = '已提交至本機 ComfyUI。完成後 WebM/MP4/GIF/WebP 輸出會匯入專案資料夾。';
     }
 
     await persistInferenceJob(job);
@@ -1742,10 +1860,203 @@ function createApp(options = {}) {
     return { imported: presets.length, presets: presets.map(toPresetResponse) };
   }
 
+  function runFfmpeg(args, execOptions = {}) {
+    return execFileAsync(ffmpegCommand[0], [...ffmpegCommand.slice(1), ...args], {
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+      ...execOptions,
+    });
+  }
+
+  async function detectFfmpeg() {
+    if (!ffmpegDetection || Date.now() - ffmpegDetection.checkedAt > FFMPEG_DETECTION_TTL_MS) {
+      const result = await runFfmpeg(['-hide_banner', '-version'], { timeout: 5_000 }).then(
+        ({ stdout }) => ({ available: true, version: stdout.split(/\r?\n/u)[0].trim().slice(0, 200) }),
+        () => ({ available: false, version: '' }),
+      );
+      ffmpegDetection = { ...result, checkedAt: Date.now() };
+    }
+    return { available: ffmpegDetection.available, version: ffmpegDetection.version };
+  }
+
+  async function transcodeVideoToMp4(fileName) {
+    const source = sanitizeFileName(fileName);
+    const sourcePath = path.join(outputDir, source);
+    const sourceMetadataPath = `${sourcePath}.json`;
+    if (!(await fileExists(sourcePath)) || !(await fileExists(sourceMetadataPath))) {
+      throw createRequestError('找不到要轉檔的影片。', 404);
+    }
+    if (path.extname(source).toLowerCase() === '.mp4') throw createRequestError('影片已是 MP4。', 409);
+    if (!(await detectFfmpeg()).available) {
+      throw createRequestError('找不到 ffmpeg：請安裝 ffmpeg 並加入 PATH，或設定 VEDIO_FACTORY_FFMPEG。', 503);
+    }
+
+    // One transcode at a time keeps CPU/GPU free for inference.
+    const run = transcodeQueue.then(async () => {
+      const baseName = source.slice(0, -path.extname(source).length);
+      let targetName = sanitizeFileName(`${baseName}.mp4`);
+      for (let suffix = 1; await fileExists(path.join(outputDir, targetName)); suffix += 1) {
+        targetName = sanitizeFileName(`${baseName}-${suffix}.mp4`);
+      }
+      const targetPath = path.join(outputDir, targetName);
+      const temporaryPath = path.join(outputDir, `.${crypto.randomUUID()}.transcode`);
+      try {
+        await runFfmpeg([
+          '-hide_banner', '-loglevel', 'error', '-y',
+          '-i', sourcePath,
+          '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'medium',
+          '-c:a', 'aac', '-b:a', '192k',
+          '-movflags', '+faststart',
+          '-f', 'mp4', temporaryPath,
+        ], { timeout: 30 * 60_000 });
+        await fs.rename(temporaryPath, targetPath);
+      } catch (error) {
+        await fs.rm(temporaryPath, { force: true });
+        const details = String(error.stderr || error.message || '').trim().slice(0, 1_000);
+        throw createRequestError(`ffmpeg 轉檔失敗：${details || '未知錯誤'}`, 500);
+      }
+      const metadata = JSON.parse(await fs.readFile(sourceMetadataPath, 'utf8'));
+      const transcoded = {
+        ...metadata,
+        id: crypto.randomUUID(),
+        fileName: targetName,
+        format: 'mp4',
+        transcodedFrom: source,
+        createdAt: new Date().toISOString(),
+      };
+      delete transcoded.updatedAt;
+      await fs.writeFile(`${targetPath}.json`, JSON.stringify(transcoded, null, 2));
+      const stats = await fs.stat(targetPath);
+      return { ...transcoded, fileSize: stats.size, previewUrl: `/api/videos/${encodeURIComponent(targetName)}` };
+    });
+    transcodeQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  async function createDelivery(payload) {
+    if (!isPlainObject(payload)) throw createRequestError('交付資料格式錯誤。');
+    const { client, project } = validateProjectTags(payload);
+    const { fileNames } = payload;
+    if (fileNames !== undefined && (
+      !Array.isArray(fileNames)
+      || !fileNames.length
+      || fileNames.length > MAX_DELIVERY_ITEMS
+      || fileNames.some((name) => typeof name !== 'string')
+    )) {
+      throw createRequestError(`fileNames 必須是 1 至 ${MAX_DELIVERY_ITEMS} 個檔名的陣列。`);
+    }
+    if (!fileNames && !client && !project) throw createRequestError('請指定客戶、專案或影片檔名。');
+
+    const items = await collectVideoItems(outputDir);
+    const selected = fileNames
+      ? [...new Set(fileNames.map(sanitizeFileName))].map((fileName) => {
+        const item = items.find((candidate) => candidate.fileName === fileName);
+        if (!item) throw createRequestError(`找不到影片：${fileName}。`, 404);
+        return item;
+      })
+      : items.filter((item) => (!client || item.client === client) && (!project || item.project === project));
+    if (!selected.length) throw createRequestError('沒有符合條件的影片。', 404);
+    if (selected.length > MAX_DELIVERY_ITEMS) {
+      throw createRequestError(`單次交付最多 ${MAX_DELIVERY_ITEMS} 部影片。`);
+    }
+
+    const jobsById = new Map((await listInferenceJobs()).map((job) => [job.id, job]));
+    const createdAt = new Date().toISOString();
+    const deliveryDir = path.join(
+      outputDir,
+      DELIVERIES_DIR_NAME,
+      sanitizeFolderName(client, '未指定客戶'),
+      sanitizeFolderName(project, '未指定專案'),
+      `${createdAt.replace(/[:.]/gu, '-')}-${crypto.randomUUID().slice(0, 8)}`,
+    );
+    await fs.mkdir(path.join(deliveryDir, 'videos'), { recursive: true });
+
+    const manifestItems = [];
+    for (const item of selected) {
+      const { fileSize, previewUrl, ...metadata } = item;
+      await fs.copyFile(path.join(outputDir, item.fileName), path.join(deliveryDir, 'videos', item.fileName));
+      const job = item.inferenceJobId ? jobsById.get(item.inferenceJobId) : null;
+      if (job?.sourceImage?.fileName) {
+        const sourcePath = path.join(getSourceImagesDir(), path.basename(job.sourceImage.fileName));
+        if (await fileExists(sourcePath)) {
+          await fs.mkdir(path.join(deliveryDir, 'sources'), { recursive: true });
+          await fs.copyFile(sourcePath, path.join(deliveryDir, 'sources', path.basename(job.sourceImage.fileName)));
+        }
+      }
+      let reproduction = { type: 'canvas', spec: metadata };
+      if (job) {
+        const { manifestPath, ...jobRecord } = job;
+        reproduction = { type: 'comfyui', job: jobRecord };
+      } else if (item.inferenceJobId) {
+        reproduction = { type: 'unavailable', reason: '找不到對應的推論工作記錄。' };
+      }
+      manifestItems.push({
+        fileName: item.fileName,
+        path: `videos/${item.fileName}`,
+        size: fileSize,
+        sha256: await hashFile(path.join(deliveryDir, 'videos', item.fileName)),
+        metadata,
+        reproduction,
+      });
+    }
+    const manifest = {
+      schemaVersion: DELIVERY_SCHEMA_VERSION,
+      generator: 'vedioFactory',
+      createdAt,
+      client,
+      project,
+      itemCount: manifestItems.length,
+      items: manifestItems,
+    };
+    const manifestPath = path.join(deliveryDir, 'manifest.json');
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    return { deliveryPath: deliveryDir, manifestPath, itemCount: manifestItems.length };
+  }
+
+  async function replayDelivery(payload) {
+    if (!isPlainObject(payload)) throw createRequestError('重新產出資料格式錯誤。');
+    const deliveriesRoot = path.join(outputDir, DELIVERIES_DIR_NAME);
+    const manifestPath = path.resolve(readOptionalText(payload, 'manifestPath', 'manifestPath', 4_096));
+    const relativePath = path.relative(deliveriesRoot, manifestPath);
+    if (path.basename(manifestPath) !== 'manifest.json'
+      || !relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw createRequestError('manifestPath 必須是輸出資料夾 deliveries 內的 manifest.json。');
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    } catch {
+      throw createRequestError('無法讀取交付 manifest。', 404);
+    }
+    const index = Number(payload.index ?? 0);
+    const item = Number.isInteger(index) && Array.isArray(manifest?.items) ? manifest.items[index] : null;
+    if (!item) throw createRequestError('交付 manifest 中找不到指定項目。', 404);
+    if (item.reproduction?.type !== 'comfyui' || !isPlainObject(item.reproduction.job)) {
+      throw createRequestError('此項目不是 ComfyUI 產出；Canvas 影片請在影片庫使用「以相同設定重新產出」。', 409);
+    }
+    const job = item.reproduction.job;
+    validateProjectTags(job);
+    if (job.sourceImage?.fileName) {
+      const fileName = path.basename(String(job.sourceImage.fileName));
+      const storedPath = path.join(getSourceImagesDir(), fileName);
+      const deliveredPath = path.join(path.dirname(manifestPath), 'sources', fileName);
+      if (!(await fileExists(storedPath)) && await fileExists(deliveredPath)) {
+        await fs.mkdir(getSourceImagesDir(), { recursive: true });
+        await fs.copyFile(deliveredPath, storedPath);
+      }
+    }
+    return rerunFromRecord(job);
+  }
+
   async function rerunInferenceJob(jobId) {
     const jobs = await listInferenceJobs();
     const original = jobs.find((item) => item.id === jobId);
     if (!original) throw createRequestError('找不到推論工作。', 404);
+    return rerunFromRecord(original);
+  }
+
+  async function rerunFromRecord(original) {
     if (!original.submittedWorkflow || typeof original.submittedWorkflow !== 'object') {
       throw createRequestError('此工作沒有保存送出的工作流快照（可能建立於舊版本），無法完整重現。', 409);
     }
@@ -1833,6 +2144,7 @@ function createApp(options = {}) {
         backendAvailable: true,
         outputDir,
         presetsDir,
+        ffmpeg: await detectFfmpeg(),
         storageMode: 'backend',
         localGpuPreferred: true,
       });
@@ -1872,7 +2184,15 @@ function createApp(options = {}) {
     }
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'GET') {
-      return sendJson(response, 200, await listInferenceJobs());
+      const limit = Number(requestUrl.searchParams.get('limit') || 500);
+      return sendJson(response, 200, await listInferenceJobSummaries({
+        refresh: requestUrl.searchParams.get('refresh') === '1',
+        limit: Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 500) : 500,
+      }));
+    }
+
+    if (requestUrl.pathname === '/api/inference/batches' && request.method === 'POST') {
+      return sendJson(response, 201, await createInferenceBatch(await readJsonBody(request)));
     }
 
     if (requestUrl.pathname === '/api/inference/jobs' && request.method === 'POST') {
@@ -1902,6 +2222,14 @@ function createApp(options = {}) {
     }
     if (presetMatch && request.method === 'DELETE') {
       return sendJson(response, 200, await deletePreset(decodeURIComponent(presetMatch[1])));
+    }
+
+    if (requestUrl.pathname === '/api/deliveries' && request.method === 'POST') {
+      return sendJson(response, 201, await createDelivery(await readJsonBody(request)));
+    }
+
+    if (requestUrl.pathname === '/api/deliveries/replay' && request.method === 'POST') {
+      return sendJson(response, 201, await replayDelivery(await readJsonBody(request)));
     }
 
     const rerunJobMatch = /^\/api\/inference\/jobs\/([^/]+)\/rerun$/u.exec(requestUrl.pathname);
@@ -1950,6 +2278,11 @@ function createApp(options = {}) {
       return sendJson(response, 201, await saveVideoAsset(body.item, body.videoBase64));
     }
 
+    const transcodeMatch = /^\/api\/videos\/([^/]+)\/transcode$/u.exec(requestUrl.pathname);
+    if (transcodeMatch && request.method === 'POST') {
+      return sendJson(response, 201, await transcodeVideoToMp4(decodeURIComponent(transcodeMatch[1])));
+    }
+
     if (requestUrl.pathname.startsWith('/api/videos/')) {
       const encodedName = requestUrl.pathname.slice('/api/videos/'.length);
       const fileName = sanitizeFileName(decodeURIComponent(encodedName));
@@ -1960,18 +2293,41 @@ function createApp(options = {}) {
         if (!(await fileExists(videoPath))) {
           return sendText(response, 404, 'Not found');
         }
-        const headers = { 'content-type': 'video/webm' };
+        const { size } = await fs.stat(videoPath);
+        const headers = { 'content-type': getContentType(videoPath), 'accept-ranges': 'bytes' };
         if (requestUrl.searchParams.get('download') === '1') {
-          headers['content-disposition'] = `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+          const asciiName = fileName.replace(/[^\x20-\x7e]|"/gu, '_');
+          headers['content-disposition'] = `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
         }
-        response.writeHead(200, headers);
-        response.end(await fs.readFile(videoPath));
+        const range = /^bytes=(\d*)-(\d*)$/u.exec(request.headers.range || '');
+        let start = 0;
+        let end = size - 1;
+        if (range && (range[1] || range[2])) {
+          start = range[1] ? Number(range[1]) : Math.max(size - Number(range[2]), 0);
+          end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start > end || start >= size) {
+            response.writeHead(416, { 'content-range': `bytes */${size}` });
+            response.end();
+            return;
+          }
+          headers['content-range'] = `bytes ${start}-${end}/${size}`;
+        }
+        headers['content-length'] = String(Math.max(end - start + 1, 0));
+        response.writeHead(range && (range[1] || range[2]) ? 206 : 200, headers);
+        if (size === 0) {
+          response.end();
+          return;
+        }
+        await pipeline(createReadStream(videoPath, { start, end }), response);
         return;
       }
 
       if (request.method === 'PATCH') {
         const body = await readJsonBody(request);
         const nextFileName = sanitizeFileName(body.nextFileName);
+        if (path.extname(nextFileName).toLowerCase() !== path.extname(fileName).toLowerCase()) {
+          throw createRequestError('重新命名不可變更影片副檔名。');
+        }
         const nextVideoPath = path.join(outputDir, nextFileName);
         const nextMetadataPath = path.join(outputDir, `${nextFileName}.json`);
         return withRenameLocks([fileName, nextFileName], async () => {

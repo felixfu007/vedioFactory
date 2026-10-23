@@ -31,7 +31,21 @@
 - Docker：`VEDIO_FACTORY_DATA_DIR=/data/app`、`VEDIO_FACTORY_WORKFLOWS_DIR=/workflows`。
 - 測試：API 與視覺測試（工作流切換、自訂解析度 1000x600 產出）通過。未實際執行 docker build。
 
+PR #7（以 main 為基底；#5、#6 已由使用者合併）。
+
+### 第 8 項：交付格式、批次與工作佇列（分支 `feature/delivery-batch-queue`，基於 `feature/multi-workflow`／PR #7）
+
+決策（2026-10-22）：交付包＝匯出成資料夾；MP4＝匯入 ComfyUI 的 MP4/GIF/WebP，加上偵測到 ffmpeg 時可選轉檔。
+
+- [x] 8a 多格式：`.webm/.mp4/.gif/.webp`、影片串流支援 Range、改名保留副檔名、GIF/WebP 以圖片預覽。
+- [x] 8b ffmpeg：`/api/config` 回報 ffmpeg；`POST /api/videos/:name/transcode`（H.264/AAC、一次一個、失敗清理）。
+- [x] 8c 批次：`POST /api/inference/batches`（prompts × seeds，≤50，單筆失敗隔離，`batchId`/`batchIndex`）。
+- [x] 8d 佇列面板：`GET /api/inference/jobs?refresh=1&limit=`（摘要、不含 prompt JSON 快照）；前端狀態篩選、取消、重跑、自動更新。
+- [x] 8e 交付資料夾：`POST /api/deliveries`、`POST /api/deliveries/replay`；資料夾名稱保留中文並避開 Windows 保留字。
+- 另修正：手機寬度（390px）頁面橫向溢出（`.layout`/卡片 `min-width: 0`、長路徑換行、`library-grid` 最小欄寬）；佇列表格在自身容器內橫向捲動。
+- 測試：`npm run test:all` 通過。
+
 ## 下一步
 
-- 第 8 項：交付格式（MP4/GIF/WebP）、批次生成、工作佇列面板、交付包。
+- 第 9 項：輸入邊界、測試與結構整理（拆分 server.js / app.js、風格模組改為檔案載入）。
 - 注意：執行 visual 測試前需 `npm ci`，並需本機 Chrome/Edge。

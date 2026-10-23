@@ -14,6 +14,7 @@
     backend: {
       available: false,
       outputDir: '',
+      ffmpeg: { available: false, version: '' },
     },
     inference: {
       runtime: null,
@@ -23,6 +24,11 @@
       pollInFlight: false,
     },
     modelCatalog: null,
+    jobs: {
+      items: [],
+      pollTimer: null,
+      loading: false,
+    },
     presets: [],
     activePresetId: '',
     workflows: [],
@@ -34,6 +40,12 @@
   };
 
   const storageKey = 'vedioFactory.library';
+  const videoExtensionPattern = /\.(webm|mp4|gif|webp)$/iu;
+  const animatedImageFormats = new Set(['gif', 'webp']);
+
+  function getItemFormat(item) {
+    return (item.format || videoExtensionPattern.exec(item.fileName || '')?.[1] || 'webm').toLowerCase();
+  }
 
   const ui = {};
 
@@ -109,6 +121,15 @@
     ui.inferenceRuntime = document.querySelector('#inferenceRuntime');
     ui.queueInferenceButton = document.querySelector('#queueInferenceButton');
     ui.cancelInferenceButton = document.querySelector('#cancelInferenceButton');
+    ui.batchPromptsInput = document.querySelector('#batchPromptsInput');
+    ui.refreshJobsButton = document.querySelector('#refreshJobsButton');
+    ui.jobStatusFilter = document.querySelector('#jobStatusFilter');
+    ui.jobsEmpty = document.querySelector('#jobsEmpty');
+    ui.jobsTable = document.querySelector('#jobsTable');
+    ui.jobsTableBody = document.querySelector('#jobsTableBody');
+    ui.jobsStatus = document.querySelector('#jobsStatus');
+    ui.batchSeedCountInput = document.querySelector('#batchSeedCountInput');
+    ui.queueBatchButton = document.querySelector('#queueBatchButton');
     ui.workflowCheckButton = document.querySelector('#workflowCheckButton');
     ui.workflowCheckStatus = document.querySelector('#workflowCheckStatus');
     ui.inferenceStatus = document.querySelector('#inferenceStatus');
@@ -137,6 +158,8 @@
     ui.importPresetsButton = document.querySelector('#importPresetsButton');
     ui.importPresetsInput = document.querySelector('#importPresetsInput');
     ui.libraryClientFilter = document.querySelector('#libraryClientFilter');
+    ui.createDeliveryButton = document.querySelector('#createDeliveryButton');
+    ui.deliveryStatus = document.querySelector('#deliveryStatus');
     ui.customResolutionFields = document.querySelector('#customResolutionFields');
     ui.customWidthInput = document.querySelector('#customWidthInput');
     ui.customHeightInput = document.querySelector('#customHeightInput');
@@ -669,7 +692,7 @@
 
     const nextLibrary = [];
     for await (const [entryName, entry] of state.folderHandle.entries()) {
-      if (entry.kind !== 'file' || !entryName.endsWith('.webm.json')) continue;
+      if (entry.kind !== 'file' || !videoExtensionPattern.test(entryName.replace(/\.json$/u, ''))) continue;
       try {
         const file = await entry.getFile();
         const metadata = JSON.parse(await file.text());
@@ -727,14 +750,52 @@
     state.libraryFilter.project = ui.libraryProjectFilter.value;
   }
 
+  function getVisibleLibraryItems() {
+    const { client, project } = state.libraryFilter;
+    return state.library.filter((item) => (
+      (!client || item.client === client) && (!project || item.project === project)
+    ));
+  }
+
+  function setDeliveryStatus(message) {
+    ui.deliveryStatus.hidden = !message;
+    ui.deliveryStatus.textContent = message;
+  }
+
+  async function createDelivery() {
+    const items = getVisibleLibraryItems();
+    if (!items.length) return;
+    // Name the folder after a client/project shared by every selected video, even without an explicit filter.
+    const sharedValue = (field) => {
+      const values = new Set(items.map((item) => item[field] || ''));
+      return values.size === 1 ? [...values][0] : '';
+    };
+    const client = state.libraryFilter.client || sharedValue('client');
+    const project = state.libraryFilter.project || sharedValue('project');
+    const scope = [client || '多個客戶', project || '多個專案'].join(' / ');
+    if (!window.confirm(`將 ${items.length} 部影片（${scope}）連同參數 manifest 複製到交付資料夾？`)) return;
+    ui.createDeliveryButton.disabled = true;
+    setDeliveryStatus('正在建立交付資料夾…');
+    try {
+      const delivery = await fetchJson('/api/deliveries', {
+        method: 'POST',
+        body: JSON.stringify({ client, project, fileNames: items.map((item) => item.fileName) }),
+      });
+      setDeliveryStatus(`已建立交付資料夾（${delivery.itemCount} 部影片）：${delivery.deliveryPath}`);
+    } catch (error) {
+      console.error(error);
+      setDeliveryStatus(`建立交付資料夾失敗：${error.message}`);
+    } finally {
+      ui.createDeliveryButton.disabled = false;
+    }
+  }
+
   function renderLibrary() {
     ui.libraryGrid.innerHTML = '';
     renderLibraryFilters();
     renderProjectOptions();
-    const { client, project } = state.libraryFilter;
-    const visibleItems = state.library.filter((item) => (
-      (!client || item.client === client) && (!project || item.project === project)
-    ));
+    const visibleItems = getVisibleLibraryItems();
+    ui.createDeliveryButton.disabled = !state.backend.available || visibleItems.length === 0;
     ui.libraryEmpty.hidden = visibleItems.length > 0;
     ui.libraryEmpty.textContent = state.library.length
       ? '沒有符合篩選條件的影片。'
@@ -753,7 +814,19 @@
 
       card.dataset.itemId = item.id;
       card.dataset.fileName = item.fileName;
-      video.src = item.previewUrl ?? '';
+      const format = getItemFormat(item);
+      if (animatedImageFormats.has(format)) {
+        const image = document.createElement('img');
+        image.className = 'video-preview';
+        image.alt = item.fileName;
+        image.src = item.previewUrl ?? '';
+        video.replaceWith(image);
+        const clipButton = card.querySelector('[data-action="clip"]');
+        clipButton.disabled = true;
+        clipButton.title = `${format.toUpperCase()} 無法在瀏覽器內剪輯`;
+      } else {
+        video.src = item.previewUrl ?? '';
+      }
       title.textContent = item.fileName;
       subtitle.textContent = `${item.moduleName} ・ ${new Date(item.createdAt).toLocaleString('zh-TW')}`;
       summary.textContent = item.story || item.prompt || '由照片與風格模組共同生成。';
@@ -763,6 +836,7 @@
 
       [
         ['長度', `${item.duration}s`],
+        ['格式', getItemFormat(item).toUpperCase()],
         ['畫質', item.quality],
         ['解析度', item.resolution],
         ['來源', item.sourceImageDataUrl ? '照片 + 提示詞' : '純文字描述'],
@@ -782,6 +856,9 @@
       card.querySelector('[data-action="rename"]').addEventListener('click', () => renameItem(item));
       card.querySelector('[data-action="clip"]').addEventListener('click', () => clipItem(item, Number(startInput.value), Number(endInput.value)));
       card.querySelector('[data-action="regenerate"]').addEventListener('click', () => regenerateItem(item));
+      const transcodeButton = card.querySelector('[data-action="transcode"]');
+      transcodeButton.hidden = !state.backend.available || !state.backend.ffmpeg.available || format === 'mp4';
+      transcodeButton.addEventListener('click', () => transcodeItem(item, transcodeButton));
       card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteItem(item));
 
       ui.libraryGrid.append(fragment);
@@ -953,6 +1030,7 @@
       const payload = await fetchJson('/api/config', { headers: {} });
       state.backend.available = true;
       state.backend.outputDir = payload.outputDir;
+      state.backend.ffmpeg = payload.ffmpeg || { available: false, version: '' };
       state.folderHandle = null;
       await listFolderItems();
       state.inference.runtime = await fetchJson('/api/inference/runtime', { headers: {} });
@@ -1289,6 +1367,127 @@
     }
   }
 
+  const jobStatusLabels = {
+    scaffolded: '未提交',
+    queued: '排隊中',
+    running: '執行中',
+    succeeded: '完成',
+    failed: '失敗',
+    cancelled: '已取消',
+  };
+
+  function isActiveJob(job) {
+    return Boolean(job.comfyPromptId) && ['queued', 'running'].includes(job.status);
+  }
+
+  function renderJobs() {
+    const filter = ui.jobStatusFilter.value;
+    const visibleJobs = state.jobs.items.filter((job) => (
+      !filter || (filter === 'active' ? isActiveJob(job) : job.status === filter)
+    ));
+    ui.jobsEmpty.hidden = visibleJobs.length > 0;
+    ui.jobsEmpty.textContent = state.jobs.items.length ? '沒有符合篩選條件的工作。' : '尚無推論工作。';
+    ui.jobsTable.hidden = visibleJobs.length === 0;
+    ui.jobsTableBody.replaceChildren(...visibleJobs.map((job) => {
+      const row = document.createElement('tr');
+      const cells = [
+        new Date(job.createdAt).toLocaleString('zh-TW'),
+        '',
+        [job.client, job.project].filter(Boolean).join(' / ') || '—',
+        (job.prompt || job.story || '').slice(0, 120),
+        Number.isSafeInteger(job.seed) ? String(job.seed) : '—',
+        job.workflowId || '—',
+        job.batchId ? `${job.batchId.slice(0, 8)} #${job.batchIndex + 1}` : '—',
+      ].map((text) => {
+        const cell = document.createElement('td');
+        cell.textContent = text;
+        return cell;
+      });
+      cells[3].className = 'prompt-cell';
+      const status = document.createElement('span');
+      status.className = 'job-status';
+      status.dataset.status = job.status;
+      status.textContent = jobStatusLabels[job.status] || job.status;
+      cells[1].append(status);
+      const notes = [
+        job.outputs?.length ? `已匯入 ${job.outputs.length} 部` : '',
+        job.rerunOf ? '重新產出' : '',
+        job.error || job.refreshError || '',
+      ].filter(Boolean).join('；');
+      if (notes) cells[1].append(document.createElement('br'), notes);
+
+      const actions = document.createElement('td');
+      const actionGroup = document.createElement('div');
+      actionGroup.className = 'row-actions';
+      if (job.comfyPromptId && job.status === 'queued') {
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'secondary';
+        cancel.textContent = '取消';
+        cancel.addEventListener('click', () => cancelQueuedJob(job, cancel));
+        actionGroup.append(cancel);
+      }
+      if (job.hasWorkflowSnapshot) {
+        const rerun = document.createElement('button');
+        rerun.type = 'button';
+        rerun.className = 'secondary';
+        rerun.textContent = '以相同設定重跑';
+        rerun.addEventListener('click', async () => {
+          rerun.disabled = true;
+          try {
+            await rerunInferenceJob(job.id);
+            await loadJobs();
+          } catch (error) {
+            ui.jobsStatus.textContent = `重新產出失敗：${error.message}`;
+          } finally {
+            rerun.disabled = false;
+          }
+        });
+        actionGroup.append(rerun);
+      }
+      actions.append(actionGroup);
+      row.append(...cells, actions);
+      return row;
+    }));
+  }
+
+  async function cancelQueuedJob(job, button) {
+    button.disabled = true;
+    try {
+      await fetchJson(`/api/inference/jobs/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
+      await loadJobs();
+    } catch (error) {
+      ui.jobsStatus.textContent = `取消失敗：${error.message}`;
+      button.disabled = false;
+    }
+  }
+
+  async function loadJobs({ refresh = false } = {}) {
+    if (!state.backend.available || state.jobs.loading) return;
+    state.jobs.loading = true;
+    window.clearTimeout(state.jobs.pollTimer);
+    const previouslyActive = new Set(state.jobs.items.filter(isActiveJob).map((job) => job.id));
+    try {
+      state.jobs.items = await fetchJson(`/api/inference/jobs?limit=100${refresh ? '&refresh=1' : ''}`, { headers: {} });
+      renderJobs();
+      const activeCount = state.jobs.items.filter(isActiveJob).length;
+      ui.jobsStatus.textContent = `共 ${state.jobs.items.length} 個工作${activeCount ? `，${activeCount} 個進行中（自動更新）` : ''}。`;
+      const finished = state.jobs.items.some((job) => previouslyActive.has(job.id) && job.status === 'succeeded');
+      if (finished) {
+        await listFolderItems();
+        renderLibrary();
+      }
+      if (activeCount) {
+        state.jobs.pollTimer = window.setTimeout(() => loadJobs({ refresh: true }), 4_000);
+      }
+    } catch (error) {
+      console.error(error);
+      ui.jobsStatus.textContent = `載入工作佇列失敗：${error.message}`;
+    } finally {
+      state.jobs.loading = false;
+    }
+  }
+
   async function rerunInferenceJob(jobId) {
     if (!state.backend.available) {
       throw new Error('目前未連線到本機後端，無法重新產出 ComfyUI 影片。');
@@ -1301,23 +1500,24 @@
     return job;
   }
 
-  async function queueInferenceJob() {
+  // Shared by single and batch submission: gathers the form and runs the workflow preflight.
+  async function prepareInferenceRequest({ hasBatchPrompts = false } = {}) {
+    if (!state.backend.available) {
+      setInferenceStatus('目前未連線到本機後端，無法建立推論工作。');
+      return null;
+    }
+
+    const file = ui.imageInput.files?.[0] ?? null;
+    const sourceImageDataUrl = await readFileAsDataUrl(file);
+    const spec = gatherSpec({ sourceImageDataUrl });
+    if (!spec.prompt && !spec.story && !hasBatchPrompts) {
+      setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
+      return null;
+    }
+    const seed = readSeedSetting();
+
+    ui.workflowCheckButton.disabled = true;
     try {
-      if (!state.backend.available) {
-        setInferenceStatus('目前未連線到本機後端，無法建立推論工作。');
-        return;
-      }
-
-      const file = ui.imageInput.files?.[0] ?? null;
-      const sourceImageDataUrl = await readFileAsDataUrl(file);
-      const spec = gatherSpec({ sourceImageDataUrl });
-      if (!spec.prompt && !spec.story) {
-        setInferenceStatus('請至少輸入提示詞或影片描述，再建立推論工作。');
-        return;
-      }
-      const seed = readSeedSetting();
-
-      ui.workflowCheckButton.disabled = true;
       const workflowCheck = await fetchJson('/api/inference/workflow-check', {
         method: 'POST',
         body: JSON.stringify({
@@ -1327,43 +1527,82 @@
         }),
       });
       renderWorkflowCheck(workflowCheck);
-      ui.workflowCheckButton.disabled = false;
       if (!workflowCheck.ready) {
         setInferenceStatus(`工作流預檢未通過：${workflowCheck.errors.join(' ')}`);
-        return;
+        return null;
       }
+    } finally {
+      ui.workflowCheckButton.disabled = false;
+    }
+    return {
+      prompt: spec.prompt,
+      story: spec.story,
+      negativePrompt: ui.negativePromptInput.value.trim(),
+      seed,
+      client: spec.client,
+      project: spec.project,
+      presetId: spec.presetId,
+      workflowId: ui.workflowSelect.value,
+      moduleId: spec.moduleId,
+      videoModelId: ui.videoModelSelect.value,
+      sourceImageDataUrl: spec.sourceImageDataUrl,
+      settings: {
+        duration: spec.duration,
+        fps: spec.fps,
+        resolution: spec.resolution,
+        quality: spec.quality,
+        motion: spec.motion,
+        captionStrength: spec.captionStrength,
+      },
+    };
+  }
+
+  async function queueInferenceBatch() {
+    ui.queueBatchButton.disabled = true;
+    try {
+      const prompts = ui.batchPromptsInput.value.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+      const seedCount = Number(ui.batchSeedCountInput.value);
+      if (!Number.isInteger(seedCount) || seedCount < 1 || seedCount > 10) {
+        throw new Error('每個提示詞的 seed 數量必須介於 1 至 10。');
+      }
+      const total = Math.max(prompts.length, 1) * seedCount;
+      if (total > 50) throw new Error(`單一批次最多 50 個工作，目前為 ${total} 個。`);
+      const payload = await prepareInferenceRequest({ hasBatchPrompts: prompts.length > 0 });
+      if (!payload) return;
+      setInferenceStatus(`正在建立 ${total} 個批次工作…`);
+      const result = await fetchJson('/api/inference/batches', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, prompts, seedCount }),
+      });
+      const failures = result.errors.length
+        ? `；${result.errors.length} 個失敗（第一個錯誤：${result.errors[0].error}）`
+        : '';
+      setInferenceStatus(`已建立批次 ${result.batchId.slice(0, 8)}：${result.created}/${result.total} 個工作${failures}`);
+      document.dispatchEvent(new CustomEvent('vediofactory:jobs-changed'));
+    } catch (error) {
+      console.error(error);
+      setInferenceStatus(`建立批次工作失敗：${error.message}`);
+    } finally {
+      ui.queueBatchButton.disabled = false;
+    }
+  }
+
+  async function queueInferenceJob() {
+    try {
+      const payload = await prepareInferenceRequest();
+      if (!payload) return;
 
       const job = await fetchJson('/api/inference/jobs', {
         method: 'POST',
-        body: JSON.stringify({
-          prompt: spec.prompt,
-          story: spec.story,
-          negativePrompt: ui.negativePromptInput.value.trim(),
-          seed,
-          client: spec.client,
-          project: spec.project,
-          presetId: spec.presetId,
-          workflowId: ui.workflowSelect.value,
-          moduleId: spec.moduleId,
-          videoModelId: ui.videoModelSelect.value,
-          sourceImageDataUrl: spec.sourceImageDataUrl,
-          settings: {
-            duration: spec.duration,
-            fps: spec.fps,
-            resolution: spec.resolution,
-            quality: spec.quality,
-            motion: spec.motion,
-            captionStrength: spec.captionStrength,
-          },
-        }),
+        body: JSON.stringify(payload),
       });
 
       state.inference.lastJob = job;
       setInferenceStatus(`已建立本機推論工作：${describeInferenceJob(job)}`);
       ui.cancelInferenceButton.hidden = !job.comfyPromptId || job.status !== 'queued';
       if (job.comfyPromptId) startInferenceJobPolling(job);
+      document.dispatchEvent(new CustomEvent('vediofactory:jobs-changed'));
     } catch (error) {
-      ui.workflowCheckButton.disabled = false;
       ui.cancelInferenceButton.hidden = true;
       console.error(error);
       setInferenceStatus(`建立推論工作失敗：${error.message}`);
@@ -1490,16 +1729,32 @@
     }
   }
 
+  async function transcodeItem(item, button) {
+    button.disabled = true;
+    setStatus(`正在以 ffmpeg 將 ${item.fileName} 轉成 MP4…`);
+    try {
+      const transcoded = await fetchJson(`/api/videos/${encodeURIComponent(item.fileName)}/transcode`, { method: 'POST' });
+      await listFolderItems();
+      renderLibrary();
+      setStatus(`已轉成 MP4：${transcoded.fileName}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`轉檔失敗：${error.message}`);
+      button.disabled = false;
+    }
+  }
+
   async function renameItem(item) {
     try {
-      const requested = window.prompt('請輸入新的檔名', item.fileName.replace(/\.webm$/u, ''));
+      const extension = `.${getItemFormat(item)}`;
+      const requested = window.prompt('請輸入新的檔名', item.fileName.replace(videoExtensionPattern, ''));
       if (!requested) return;
-      const normalizedName = requested.trim().replace(/\.webm$/u, '');
+      const normalizedName = requested.trim().replace(videoExtensionPattern, '');
       if (!normalizedName) {
         setStatus('請輸入有效的檔名。');
         return;
       }
-      const nextFileName = `${normalizedName}.webm`;
+      const nextFileName = `${normalizedName}${extension}`;
       const updated = {
         ...item,
         fileName: nextFileName,
@@ -1761,6 +2016,10 @@
     ui.pickFolderButton.addEventListener('click', pickFolder);
     ui.refreshButton.addEventListener('click', refreshLibrary);
     ui.queueInferenceButton.addEventListener('click', queueInferenceJob);
+    ui.queueBatchButton.addEventListener('click', queueInferenceBatch);
+    ui.refreshJobsButton.addEventListener('click', () => loadJobs({ refresh: true }));
+    ui.jobStatusFilter.addEventListener('change', renderJobs);
+    document.addEventListener('vediofactory:jobs-changed', () => loadJobs());
     ui.cancelInferenceButton.addEventListener('click', cancelInferenceJob);
     ui.workflowCheckButton.addEventListener('click', checkComfyWorkflow);
     ui.setupModelBatchButton.addEventListener('click', setupModelBatch);
@@ -1783,6 +2042,7 @@
       state.libraryFilter.client = ui.libraryClientFilter.value;
       renderLibrary();
     });
+    ui.createDeliveryButton.addEventListener('click', createDelivery);
     ui.libraryProjectFilter.addEventListener('change', () => {
       state.libraryFilter.project = ui.libraryProjectFilter.value;
       renderLibrary();
@@ -1799,6 +2059,7 @@
     await initBackend();
     await loadWorkflows();
     await loadPresets();
+    await loadJobs({ refresh: true });
     syncStorageUi();
     renderLibrary();
   }

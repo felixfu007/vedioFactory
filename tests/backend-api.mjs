@@ -28,6 +28,7 @@ async function main() {
     outputDir: managedOutputDir,
     dataDir: path.join(managedOutputDir, 'app-data'),
     workflowsDir: path.join(managedOutputDir, 'no-workflows'),
+    ffmpegCommand: [path.join(managedOutputDir, 'missing-ffmpeg.exe')],
     maxVideoUploadBytes: 1024,
   });
   const address = app.server.address();
@@ -36,6 +37,7 @@ async function main() {
   try {
     const config = await fetch(`${origin}/api/config`).then((response) => response.json());
     assert.equal(config.backendAvailable, true);
+    assert.deepEqual(config.ffmpeg, { available: false, version: '' });
     assert.equal(config.outputDir, managedOutputDir);
 
     const runtime = await fetch(`${origin}/api/inference/runtime`).then((response) => response.json());
@@ -259,6 +261,54 @@ async function main() {
       method: 'DELETE',
     }).then((response) => response.json());
     assert.equal(deletedBinary.ok, true);
+
+    // Additional delivery formats: MP4 upload, typed serving, byte ranges, extension-preserving rename.
+    const mp4Item = { ...item, id: 'mp4-upload-id', fileName: 'delivery.mp4' };
+    const mp4Response = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody(mp4Item, Buffer.from('0123456789')),
+    });
+    assert.equal(mp4Response.status, 201);
+    const [listedMp4] = await fetch(`${origin}/api/videos`).then((response) => response.json());
+    assert.equal(listedMp4.fileName, 'delivery.mp4');
+    assert.equal(listedMp4.format, 'mp4');
+    const mp4Get = await fetch(`${origin}/api/videos/delivery.mp4`);
+    assert.equal(mp4Get.headers.get('content-type'), 'video/mp4');
+    assert.equal(mp4Get.headers.get('accept-ranges'), 'bytes');
+    assert.equal(await mp4Get.text(), '0123456789');
+    const rangeGet = await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=2-5' } });
+    assert.equal(rangeGet.status, 206);
+    assert.equal(rangeGet.headers.get('content-range'), 'bytes 2-5/10');
+    assert.equal(await rangeGet.text(), '2345');
+    const suffixRangeGet = await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=-3' } });
+    assert.equal(await suffixRangeGet.text(), '789');
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4`, { headers: { range: 'bytes=20-30' } })).status, 416);
+    const extensionChange = await fetch(`${origin}/api/videos/delivery.mp4`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nextFileName: 'delivery.webm' }),
+    });
+    assert.equal(extensionChange.status, 400);
+    assert.match((await extensionChange.json()).error, /副檔名/);
+    const badExtensionResponse = await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody({ ...item, id: 'txt-id', fileName: 'notes.txt' }, Buffer.from('x')),
+    });
+    assert.equal(badExtensionResponse.status, 400);
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4/transcode`, { method: 'POST' })).status, 409);
+    await fetch(`${origin}/api/videos`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: createVideoUploadBody({ ...item, id: 'no-ffmpeg-id', fileName: 'no-ffmpeg.webm' }, Buffer.from('x')),
+    });
+    const noFfmpegResponse = await fetch(`${origin}/api/videos/no-ffmpeg.webm/transcode`, { method: 'POST' });
+    assert.equal(noFfmpegResponse.status, 503);
+    assert.match((await noFfmpegResponse.json()).error, /ffmpeg/);
+    assert.equal((await fetch(`${origin}/api/videos/missing.webm/transcode`, { method: 'POST' })).status, 404);
+    await fetch(`${origin}/api/videos/no-ffmpeg.webm`, { method: 'DELETE' });
+    assert.equal((await fetch(`${origin}/api/videos/delivery.mp4`, { method: 'DELETE' })).status, 200);
 
     const inferenceJob = await fetch(`${origin}/api/inference/jobs`, {
       method: 'POST',
@@ -493,7 +543,11 @@ async function main() {
         response.end(JSON.stringify(comfyFinished ? {
           'comfy-prompt-123': {
             status: { completed: true, status_str: 'success' },
-            outputs: { '4': { videos: [{ filename: 'generated.webm', type: 'output' }] } },
+            outputs: {
+              '4': { videos: [{ filename: 'generated.webm', type: 'output' }] },
+              '6': { gifs: [{ filename: 'generated.mp4', type: 'output', subfolder: '' }] },
+              '7': { images: [{ filename: 'frame.png', type: 'output' }] },
+            },
           },
         } : comfyRunning ? {
           'comfy-prompt-123': { status: { completed: false, status_str: 'running' }, outputs: {} },
@@ -512,6 +566,21 @@ async function main() {
     const comfyOrigin = `http://127.0.0.1:${comfyServer.address().port}`;
     const comfyOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-comfy-'));
     const workflowPath = path.join(comfyOutputDir, 'workflow.json');
+    const fakeFfmpegPath = path.join(comfyOutputDir, 'fake-ffmpeg.mjs');
+    await fs.writeFile(fakeFfmpegPath, `
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+if (args.includes('-version')) {
+  console.log('ffmpeg version 9.9-fake');
+  process.exit(0);
+}
+const input = args[args.indexOf('-i') + 1];
+if (input.includes('fail')) {
+  console.error('fake encoder failure');
+  process.exit(1);
+}
+fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
+`);
     const workflowsDir = path.join(comfyOutputDir, 'workflows');
     await fs.mkdir(workflowsDir);
     await fs.writeFile(path.join(workflowsDir, 'wan-t2v.json'), JSON.stringify({
@@ -555,6 +624,7 @@ async function main() {
       outputDir: comfyOutputDir,
       dataDir: path.join(comfyOutputDir, 'app-data'),
       workflowsDir,
+      ffmpegCommand: [process.execPath, fakeFfmpegPath],
       comfyUIUrl: comfyOrigin,
       comfyUIWorkflowPath: workflowPath,
     });
@@ -684,6 +754,12 @@ async function main() {
       assert.equal(queuedJob.status, 'queued');
 
       comfyRunning = true;
+      const refreshedJobs = await fetch(`${comfyAppOrigin}/api/inference/jobs?refresh=1`).then((response) => response.json());
+      const refreshedComfyJob = refreshedJobs.find((job) => job.id === comfyJob.id);
+      assert.equal(refreshedComfyJob.status, 'running');
+      assert.equal(refreshedComfyJob.hasWorkflowSnapshot, true);
+      assert.equal('submittedWorkflow' in refreshedComfyJob, false);
+      assert.equal((await fetch(`${comfyAppOrigin}/api/inference/jobs?limit=1`).then((response) => response.json())).length, 1);
       const runningJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(runningJob.status, 'running');
       const runningCancelResponse = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/cancel`, {
@@ -694,17 +770,44 @@ async function main() {
       comfyFinished = true;
       const completedJob = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}`).then((response) => response.json());
       assert.equal(completedJob.status, 'succeeded', JSON.stringify(completedJob));
-      assert.equal(completedJob.outputs.length, 1);
+      assert.equal(completedJob.outputs.length, 2);
       assert.equal(await fs.readFile(path.join(comfyOutputDir, completedJob.outputs[0].fileName), 'utf8'), 'fake-comfy-webm');
       const importedVideos = await fetch(`${comfyAppOrigin}/api/videos`).then((response) => response.json());
-      assert.equal(importedVideos.length, 1);
-      assert.match(importedVideos[0].fileName, /\.webm$/u);
+      assert.equal(importedVideos.length, 2);
+      assert.deepEqual(importedVideos.map((video) => video.format).sort(), ['mp4', 'webm']);
       assert.equal(importedVideos[0].seed, 42);
       assert.equal(importedVideos[0].negativePrompt, 'blurry, watermark');
       assert.equal(importedVideos[0].workflowSha256, workflowSha256);
       assert.equal(importedVideos[0].inferenceJobId, comfyJob.id);
       assert.equal(importedVideos[0].client, '客戶A');
       assert.equal(importedVideos[0].project, '春季活動');
+
+      const comfyConfig = await fetch(`${comfyAppOrigin}/api/config`).then((response) => response.json());
+      assert.deepEqual(comfyConfig.ffmpeg, { available: true, version: 'ffmpeg version 9.9-fake' });
+      const importedWebm = importedVideos.find((video) => video.format === 'webm');
+      const transcodeResponse = await fetch(`${comfyAppOrigin}/api/videos/${importedWebm.fileName}/transcode`, { method: 'POST' });
+      assert.equal(transcodeResponse.status, 201);
+      const transcoded = await transcodeResponse.json();
+      assert.equal(transcoded.fileName, importedWebm.fileName.replace(/\.webm$/u, '.mp4'));
+      assert.equal(transcoded.format, 'mp4');
+      assert.equal(transcoded.transcodedFrom, importedWebm.fileName);
+      assert.equal(transcoded.seed, 42);
+      assert.notEqual(transcoded.id, importedWebm.id);
+      assert.equal(await fs.readFile(path.join(comfyOutputDir, transcoded.fileName), 'utf8'), 'MP4:fake-comfy-webm');
+      const transcodedAgain = await fetch(`${comfyAppOrigin}/api/videos/${importedWebm.fileName}/transcode`, { method: 'POST' })
+        .then((response) => response.json());
+      assert.equal(transcodedAgain.fileName, importedWebm.fileName.replace(/\.webm$/u, '-1.mp4'));
+      await fetch(`${comfyAppOrigin}/api/videos`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: createVideoUploadBody({ id: 'fail-id', fileName: 'fail-me.webm', createdAt: new Date().toISOString() }, Buffer.from('x')),
+      });
+      const failedTranscode = await fetch(`${comfyAppOrigin}/api/videos/fail-me.webm/transcode`, { method: 'POST' });
+      assert.equal(failedTranscode.status, 500);
+      assert.match((await failedTranscode.json()).error, /fake encoder failure/);
+      const filesAfterFailure = await fs.readdir(comfyOutputDir);
+      assert.equal(filesAfterFailure.includes('fail-me.mp4'), false);
+      assert.equal(filesAfterFailure.some((name) => name.endsWith('.transcode')), false);
 
       const pendingJob = await fetch(`${comfyAppOrigin}/api/inference/jobs`, {
         method: 'POST',
@@ -749,6 +852,44 @@ async function main() {
       assert.deepEqual(rerunJob.warnings, []);
       assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
 
+      // Batches: prompts x seeds, per-item failures isolated.
+      const postBatch = (payload) => fetch(`${comfyAppOrigin}/api/inference/batches`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const batchBase = { ...reproduciblePayload, prompt: '' };
+      const promptsBeforeBatch = comfyWorkflows.length;
+      const batchResponse = await postBatch({ ...batchBase, prompts: ['批次 A', ' ', '批次 B'], seed: 100, seedCount: 2 });
+      assert.equal(batchResponse.status, 201);
+      const batch = await batchResponse.json();
+      assert.equal(batch.total, 4);
+      assert.equal(batch.created, 4);
+      assert.deepEqual(batch.errors, []);
+      assert.deepEqual(batch.jobs.map((job) => job.seed), [100, 101, 100, 101]);
+      assert.deepEqual(batch.jobs.map((job) => job.batchIndex), [0, 1, 2, 3]);
+      assert.ok(batch.jobs.every((job) => job.batchId === batch.batchId && job.client === '客戶A'));
+      assert.ok(batch.jobs.every((job) => job.hasWorkflowSnapshot && !('submittedWorkflow' in job)));
+      assert.deepEqual(
+        comfyWorkflows.slice(promptsBeforeBatch).map((workflow) => [workflow['1'].inputs.text, workflow['5'].inputs.seed]),
+        [['批次 A', 100], ['批次 A', 101], ['批次 B', 100], ['批次 B', 101]],
+      );
+      const randomBatch = await postBatch({ ...batchBase, prompt: '隨機批次', seed: undefined, seedCount: 3 }).then((response) => response.json());
+      assert.equal(randomBatch.created, 3);
+      assert.ok(randomBatch.jobs.every((job) => job.seedMode === 'random' && Number.isSafeInteger(job.seed)));
+      const partialBatch = await postBatch({ ...batchBase, prompts: ['正常', 'x'.repeat(5_001)] }).then((response) => response.json());
+      assert.equal(partialBatch.created, 1);
+      assert.equal(partialBatch.errors.length, 1);
+      assert.equal(partialBatch.errors[0].index, 1);
+      assert.equal(partialBatch.errors[0].statusCode, 400);
+      const allFailedBatch = await postBatch({ ...batchBase, prompts: ['x'.repeat(5_001)] });
+      assert.equal(allFailedBatch.status, 400);
+      assert.match((await allFailedBatch.json()).error, /所有工作/);
+      assert.equal((await postBatch({ ...batchBase, prompts: Array(6).fill('多'), seedCount: 10 })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: ['a'], seedCount: 0 })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: 'not-array' })).status, 400);
+      assert.equal((await postBatch({ ...batchBase, prompts: ['a'], seeds: [1, -1] })).status, 400);
+
       await fs.writeFile(workflowPath, JSON.stringify({
         '1': { class_type: 'CLIPTextEncode', inputs: { text: '{{unknown_value}}' } },
       }));
@@ -771,6 +912,60 @@ async function main() {
       const missingSourceRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${comfyJob.id}/rerun`, { method: 'POST' });
       assert.equal(missingSourceRerun.status, 409);
       assert.match((await missingSourceRerun.json()).error, /來源圖片快照/);
+
+      // Delivery folders: copy videos + source images + manifest, then replay from the manifest.
+      const sourceSnapshotPath = path.join(comfyOutputDir, 'inference-jobs', 'sources', `${sourceImageSha256}.png`);
+      await fs.writeFile(sourceSnapshotPath, 'hello');
+      const postDelivery = (payload) => fetch(`${comfyAppOrigin}/api/deliveries`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const deliveryResponse = await postDelivery({ client: '客戶A', project: '春季活動' });
+      assert.equal(deliveryResponse.status, 201);
+      const delivery = await deliveryResponse.json();
+      assert.equal(delivery.itemCount, 4);
+      assert.ok(delivery.deliveryPath.startsWith(path.join(comfyOutputDir, 'deliveries', '客戶A', '春季活動')));
+      const deliveryManifest = JSON.parse(await fs.readFile(delivery.manifestPath, 'utf8'));
+      assert.equal(deliveryManifest.schemaVersion, 1);
+      assert.equal(deliveryManifest.client, '客戶A');
+      for (const deliveredItem of deliveryManifest.items) {
+        const deliveredBytes = await fs.readFile(path.join(delivery.deliveryPath, deliveredItem.path));
+        assert.equal(deliveredItem.sha256, crypto.createHash('sha256').update(deliveredBytes).digest('hex'));
+        assert.equal(deliveredItem.reproduction.type, 'comfyui');
+        assert.equal(deliveredItem.reproduction.job.seed, 42);
+        assert.equal('manifestPath' in deliveredItem.reproduction.job, false);
+        assert.deepEqual(deliveredItem.reproduction.job.submittedWorkflow, comfyWorkflows[0]);
+      }
+      assert.equal(await fs.readFile(path.join(delivery.deliveryPath, 'sources', `${sourceImageSha256}.png`), 'utf8'), 'hello');
+      await fs.rm(sourceSnapshotPath);
+
+      const postReplay = (payload) => fetch(`${comfyAppOrigin}/api/deliveries/replay`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const replayResponse = await postReplay({ manifestPath: delivery.manifestPath, index: 0 });
+      assert.equal(replayResponse.status, 201);
+      const replayed = await replayResponse.json();
+      assert.equal(replayed.rerunOf, comfyJob.id);
+      assert.equal(replayed.seed, 42);
+      assert.deepEqual(comfyWorkflows.at(-1), comfyWorkflows[0]);
+      assert.equal(await fs.readFile(sourceSnapshotPath, 'utf8'), 'hello');
+
+      const canvasDelivery = await postDelivery({ fileNames: ['fail-me.webm'] }).then((response) => response.json());
+      assert.equal(canvasDelivery.itemCount, 1);
+      assert.ok(canvasDelivery.deliveryPath.includes(path.join('未指定客戶', '未指定專案')));
+      const canvasManifest = JSON.parse(await fs.readFile(canvasDelivery.manifestPath, 'utf8'));
+      assert.equal(canvasManifest.items[0].reproduction.type, 'canvas');
+      assert.equal((await postReplay({ manifestPath: canvasDelivery.manifestPath, index: 0 })).status, 409);
+      assert.equal((await postReplay({ manifestPath: delivery.manifestPath, index: 99 })).status, 404);
+      assert.equal((await postReplay({ manifestPath: path.join(comfyOutputDir, 'manifest.json') })).status, 400);
+      assert.equal((await postReplay({ manifestPath: path.join(comfyOutputDir, 'deliveries', '..', 'manifest.json') })).status, 400);
+      assert.equal((await postDelivery({})).status, 400);
+      assert.equal((await postDelivery({ fileNames: ['nope.webm'] })).status, 404);
+      assert.equal((await postDelivery({ client: '無此客戶' })).status, 404);
+      assert.equal((await postDelivery({ client: 'CON', fileNames: ['fail-me.webm'] })).status, 201);
     } finally {
       await new Promise((resolve) => comfyApp.server.close(resolve));
       await new Promise((resolve) => comfyServer.close(resolve));
