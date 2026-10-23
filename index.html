@@ -277,6 +277,46 @@
         <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
       </section>
 
+      <section class="card civitai-card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Civitai</p>
+            <h2>從 Civitai 安裝模型</h2>
+          </div>
+        </div>
+        <p class="hint">
+          貼上 civitai.com 的模型網址，先查詢確認授權與大小，再下載安裝到 ComfyUI 的 models 資料夾。只接受 .safetensors，下載後比對 SHA-256；不安裝標示為成人內容、真人肖像或涉及未成年人的模型。
+        </p>
+        <div class="preset-grid">
+          <label class="civitai-url">
+            Civitai 模型網址
+            <input id="civitaiUrlInput" type="url" placeholder="https://civitai.com/models/12345" spellcheck="false" />
+          </label>
+          <label>
+            安裝到
+            <select id="civitaiFolderSelect">
+              <option value="">自動（依模型類型）</option>
+              <option value="checkpoints">checkpoints（主模型）</option>
+              <option value="diffusion_models">diffusion_models（Wan、Flux 等）</option>
+              <option value="loras">loras</option>
+              <option value="vae">vae</option>
+              <option value="embeddings">embeddings</option>
+              <option value="upscale_models">upscale_models</option>
+              <option value="controlnet">controlnet</option>
+              <option value="text_encoders">text_encoders</option>
+              <option value="clip_vision">clip_vision</option>
+            </select>
+          </label>
+        </div>
+        <div class="preset-actions">
+          <button id="civitaiPreviewButton" type="button" class="secondary">查詢模型</button>
+          <button id="civitaiInstallButton" type="button" class="primary" disabled>下載並安裝</button>
+        </div>
+        <div id="civitaiPreview" class="module-details" hidden></div>
+        <p id="civitaiStatus" class="status-text"></p>
+        <div id="civitaiJobs" class="civitai-jobs"></div>
+      </section>
+
       <section class="card">
         <div class="section-header">
           <div>

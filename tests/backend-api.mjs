@@ -32,9 +32,90 @@ function createVideoUploadBody(metadata, videoBytes) {
   return Buffer.concat([metadataLength, metadataBytes, videoBytes]);
 }
 
+// A stand-in for civitai.com's API and download endpoints.
+async function startMockCivitai() {
+  const modelBytes = Buffer.from('fake-safetensors-weights');
+  const sha256 = crypto.createHash('sha256').update(modelBytes).digest('hex').toUpperCase();
+  let origin = '';
+  const file = (name, versionId, overrides = {}) => ({
+    name,
+    type: 'Model',
+    sizeKB: modelBytes.length / 1024,
+    primary: true,
+    metadata: { format: name.endsWith('.safetensors') ? 'SafeTensor' : 'PickleTensor' },
+    pickleScanResult: 'Success',
+    virusScanResult: 'Success',
+    hashes: { SHA256: sha256 },
+    downloadUrl: `${origin}/api/download/models/${versionId}`,
+    ...overrides,
+  });
+  const model = (id, overrides = {}, fileName = `model-${id}.safetensors`) => ({
+    id,
+    name: `測試模型 ${id}`,
+    type: 'LORA',
+    nsfw: false,
+    poi: false,
+    minor: false,
+    allowCommercialUse: ['Image', 'Rent'],
+    allowNoCredit: true,
+    allowDerivatives: true,
+    ...overrides,
+    modelVersions: [{ id: id + 100, name: 'v1', baseModel: 'Wan Video 2.2 TI2V-5B', trainedWords: ['tst'], files: [file(fileName, id + 100)] }],
+  });
+  const models = {
+    100: model(100),
+    101: model(101, { nsfw: true }),
+    102: model(102, { poi: true }),
+    103: model(103, {}, 'old-format.ckpt'),
+    104: model(104),
+    105: model(105, { allowCommercialUse: ['None'] }),
+    106: model(106, { type: 'Workflows' }),
+  };
+  const server = http.createServer((request, response) => {
+    const url = new URL(request.url, origin);
+    const modelMatch = /^\/api\/v1\/models\/(\d+)$/u.exec(url.pathname);
+    const versionMatch = /^\/api\/v1\/model-versions\/(\d+)$/u.exec(url.pathname);
+    const downloadMatch = /^\/api\/download\/models\/(\d+)$/u.exec(url.pathname);
+    if (modelMatch && models[modelMatch[1]]) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify(models[modelMatch[1]]));
+    } else if (versionMatch && Number(versionMatch[1]) === 200) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ ...models[100].modelVersions[0], modelId: 100 }));
+    } else if (downloadMatch && downloadMatch[1] === '200') {
+      response.writeHead(302, { location: `${origin}/cdn/model-200.bin` });
+      response.end();
+    } else if (url.pathname === '/cdn/model-200.bin' || (downloadMatch && downloadMatch[1] === '205')) {
+      response.writeHead(200, { 'content-length': String(modelBytes.length) });
+      response.end(modelBytes);
+    } else if (downloadMatch && downloadMatch[1] === '204') {
+      response.end('tampered-content');
+    } else if (downloadMatch && downloadMatch[1] === '206') {
+      response.writeHead(401);
+      response.end();
+    } else {
+      response.writeHead(404);
+      response.end('{}');
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  origin = `http://127.0.0.1:${server.address().port}`;
+  for (const item of Object.values(models)) {
+    item.modelVersions[0].files[0].downloadUrl = `${origin}/api/download/models/${item.modelVersions[0].id}`;
+  }
+  models[106].modelVersions[0].files[0].downloadUrl = `${origin}/api/download/models/206`;
+  models[106].type = 'LORA';
+  return { server, origin, modelBytes };
+}
+
 async function main() {
   const managedOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vediofactory-api-'));
+  const civitai = await startMockCivitai();
+  const comfyModelsDir = path.join(managedOutputDir, 'comfy-models');
+  await fs.mkdir(comfyModelsDir);
   const app = await startServer({
+    comfyUIModelsDir: comfyModelsDir,
+    civitaiOrigin: civitai.origin,
     port: 0,
     host: '127.0.0.1',
     outputDir: managedOutputDir,
@@ -455,6 +536,69 @@ async function main() {
       if (expectedStatus === 201) await fs.rm((await resolutionResponse.json()).manifestPath);
       else assert.match((await resolutionResponse.json()).error, /解析度/);
     }
+
+    // Civitai model installs: preview, policy refusals, verified download, no overwrite.
+    const postInstall = (url, payload) => fetch(`${origin}${url}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const previewResponse = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/100/test-lora' });
+    assert.equal(previewResponse.status, 200);
+    const modelPreview = await previewResponse.json();
+    assert.equal(modelPreview.folder, 'loras');
+    assert.equal(modelPreview.fileName, 'model-100.safetensors');
+    assert.equal(modelPreview.license.allowsCommercialOutputs, true);
+    assert.deepEqual(modelPreview.trainedWords, ['tst']);
+    assert.equal(modelPreview.modelsDirReady, true);
+    assert.equal('downloadUrl' in modelPreview, true);
+    const versionPreview = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/api/download/models/200' })
+      .then((response) => response.json());
+    assert.equal(versionPreview.modelId, 100);
+    for (const [url, status, pattern] of [
+      ['https://evil.example/models/100', 400, /civitai\.com/],
+      ['not a url', 400, /完整/],
+      ['https://civitai.com/images/5', 400, /看不懂/],
+      ['https://civitai.com/models/101', 403, /成人內容/],
+      ['https://civitai.com/models/102', 403, /真實人物/],
+      ['https://civitai.com/models/103', 400, /safetensors/],
+      ['https://civitai.com/models/999', 404, /找不到/],
+    ]) {
+      const refused = await postInstall('/api/model-installs/preview', { url });
+      assert.equal(refused.status, status, url);
+      assert.match((await refused.json()).error, pattern, url);
+    }
+    const badFolder = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/100', folder: '../system32' });
+    assert.equal(badFolder.status, 400);
+    const noCommercial = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/105' })
+      .then((response) => response.json());
+    assert.equal(noCommercial.license.allowsCommercialOutputs, false);
+
+    const installResponse = await postInstall('/api/model-installs', { url: 'https://civitai.com/models/100' });
+    assert.equal(installResponse.status, 202);
+    const installJob = await installResponse.json();
+    assert.equal(installJob.status, 'queued');
+    assert.equal('controller' in installJob, false);
+    await postInstall('/api/model-installs', { url: 'https://civitai.com/models/104', folder: 'diffusion_models' });
+    await postInstall('/api/model-installs', { url: 'https://civitai.com/models/106' });
+    await app.modelInstaller.waitForIdle();
+    const installs = await fetch(`${origin}/api/model-installs`).then((response) => response.json());
+    const byModel = (id) => installs.jobs.find((job) => job.info.modelId === id);
+    assert.equal(byModel(100).status, 'installed', JSON.stringify(byModel(100)));
+    assert.equal(await fs.readFile(path.join(comfyModelsDir, 'loras', 'model-100.safetensors'), 'utf8'), civitai.modelBytes.toString());
+    assert.equal(byModel(104).status, 'failed');
+    assert.match(byModel(104).error, /SHA-256/);
+    assert.match(byModel(106).error, /VEDIO_FACTORY_CIVITAI_TOKEN/);
+    assert.deepEqual(await fs.readdir(path.join(comfyModelsDir, 'diffusion_models')), []);
+    assert.equal(installs.installed.length, 1);
+    assert.equal(installs.installed[0].fileName, 'model-100.safetensors');
+    assert.equal('downloadUrl' in installs.installed[0], false);
+    await postInstall('/api/model-installs', { url: 'https://civitai.com/models/100' });
+    await app.modelInstaller.waitForIdle();
+    const reinstall = (await fetch(`${origin}/api/model-installs`).then((response) => response.json())).jobs[0];
+    assert.equal(reinstall.status, 'failed');
+    assert.match(reinstall.error, /已存在/);
+    assert.equal((await postInstall('/api/model-installs/nope/cancel', {})).status, 404);
 
     // Parameter presets: CRUD, validation, export/import round trip.
     const presetsDir = path.join(managedOutputDir, 'app-data', 'presets');
@@ -1134,6 +1278,7 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
     console.log(JSON.stringify({ ok: true, origin, managedOutputDir, repoRoot }, null, 2));
   } finally {
     await new Promise((resolve) => app.server.close(resolve));
+    await new Promise((resolve) => civitai.server.close(resolve));
     await fs.rm(managedOutputDir, { recursive: true, force: true });
   }
 }

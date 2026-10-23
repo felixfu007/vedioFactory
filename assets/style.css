@@ -258,6 +258,40 @@ textarea {
   color: var(--primary-strong);
 }
 
+.civitai-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.civitai-card .section-header {
+  margin-bottom: 0;
+}
+
+.civitai-card .civitai-url {
+  grid-column: span 2;
+}
+
+.civitai-jobs {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.civitai-job {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(151, 171, 196, 0.16);
+}
+
+.civitai-job progress {
+  width: 100%;
+}
+
+.license-warning {
+  color: #ffc5cf;
+}
+
 .library-filters {
   margin-bottom: 1rem;
 }
@@ -390,6 +424,10 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .civitai-card .civitai-url {
+    grid-column: auto;
+  }
+
   .parameter-grid,
   .preset-grid,
   .actions,

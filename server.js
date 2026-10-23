@@ -8,6 +8,7 @@ const path = require('node:path');
 const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { URL } = require('node:url');
+const { createModelInstaller } = require('./lib/model-installer.js');
 const {
   BASE_CAPABILITIES,
   isResolutionAllowed,
@@ -887,6 +888,17 @@ function createApp(options = {}) {
   const presetsDir = path.join(dataDir, PRESETS_DIR_NAME);
   const workflowsDir = path.resolve(options.workflowsDir || DEFAULT_WORKFLOWS_DIR);
   const modulesDir = path.resolve(options.modulesDir || DEFAULT_MODULES_DIR);
+  const modelInstaller = createModelInstaller({
+    dataDir,
+    modelsDir: path.resolve(
+      options.comfyUIModelsDir
+      || process.env.VEDIO_FACTORY_COMFYUI_MODELS_DIR
+      || path.join(os.homedir(), 'ComfyUI', 'models'),
+    ),
+    apiOrigin: options.civitaiOrigin || 'https://civitai.com',
+    token: options.civitaiToken ?? process.env.VEDIO_FACTORY_CIVITAI_TOKEN ?? '',
+    fetchImpl: options.fetchImpl,
+  });
   // [command, ...prefixArgs] so tests can substitute a script run by node.
   const ffmpegCommand = options.ffmpegCommand || DEFAULT_FFMPEG_COMMAND;
   const allowedHostnames = new Set([
@@ -2440,6 +2452,25 @@ function createApp(options = {}) {
       return sendJson(response, 200, presets.map(toPresetResponse));
     }
 
+    if (requestUrl.pathname === '/api/model-installs' && request.method === 'GET') {
+      return sendJson(response, 200, await modelInstaller.list());
+    }
+
+    if (requestUrl.pathname === '/api/model-installs/preview' && request.method === 'POST') {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, await modelInstaller.preview(body.url, body.folder || ''));
+    }
+
+    if (requestUrl.pathname === '/api/model-installs' && request.method === 'POST') {
+      const body = await readJsonBody(request);
+      return sendJson(response, 202, await modelInstaller.install(body.url, body.folder || ''));
+    }
+
+    const modelInstallCancel = /^\/api\/model-installs\/([^/]+)\/cancel$/u.exec(requestUrl.pathname);
+    if (modelInstallCancel && request.method === 'POST') {
+      return sendJson(response, 200, modelInstaller.cancel(decodeURIComponent(modelInstallCancel[1])));
+    }
+
     if (requestUrl.pathname === '/api/scenario-modules' && request.method === 'GET') {
       return sendJson(response, 200, (await listScenarioModules()).map(toScenarioModuleResponse));
     }
@@ -2699,6 +2730,7 @@ function createApp(options = {}) {
 
   return {
     server,
+    modelInstaller,
     getOutputDir: () => outputDir,
     setOutputDir(nextOutputDir) {
       outputDir = normalizeOutputDir(nextOutputDir);
