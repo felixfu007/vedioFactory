@@ -94,11 +94,23 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 使用者選擇：細節欄位做成「選單加自填」；預裝人物類模組：藝人形象、活動形象、寫真攝影、人物介紹、體育競技。
 注意：人物皆為 AI 虛構，提示詞不得寫真實藝人姓名；寫真攝影排除裸露與性感暗示。
 
-- [ ] D1 細節欄位：`modules/_shared/fields.json` 共用欄位庫（鏡頭、角度、運鏡、表情、光線等），module.json `fields` 可用 `use` 引用並覆寫；後端驗證並在 `/api/scenario-modules` 回傳；預設可記住 `scenarioModuleId`。
-- [ ] D2 前端：預設變數依欄位定義顯示為下拉選單＋「自訂…」文字框，讀值統一由一個函式處理；測試更新。
-- [ ] D3 既有跳舞／走秀／健身房改用細節欄位。
-- [ ] D4 新增五個人物模組（僅 AI 工作流，不做 Canvas 預覽）：talent、event、portrait、profile、sports。
-- [ ] D5 用 GPU 各產生一部範例影片並逐一看畫面，必要時調整提示詞；更新說明書與 README；PR、合併。
+- [x] D1 細節欄位：`modules/_shared/fields.json` 共用欄位庫，module.json `fields` 用 `use` 引用並覆寫；後端 `validateFieldDefinition`，`/api/scenario-modules` 回傳 `fields`。（未做「使用者預設記住 scenarioModuleId」：使用者另存的預設是已填好的文字，不含變數，不需要。）
+- [x] D2 前端：`readPresetVariableValues()`、`createVariableField()`；下拉選單＋「自訂…」（值 `__custom__`）；修正「切換預設時沿用上一個預設的輸入值」（用 `presetVariables.dataset.presetId` 判斷）。
+- [x] D3 跳舞／走秀／健身房改用細節欄位（變數 person 取代 dancer/model/athlete）。
+- [x] D4 五個人物模組：talent（直式）、event（橫式）、portrait（直式）、profile（橫式）、sports（橫式），只有 AI 工作流沒有 Canvas。產生器：暫存區 `gen_modules2.py`（已用完，模組檔已提交）。
+- 提交：`ab8af9f`（本機分支，尚未推送）。`npm run test:all` 全部通過。
+- [ ] D5 用 GPU 產生五個新模組的範例影片：`node tools/generate-examples.mjs --only talent,event,portrait,profile,sports`（約 30 分鐘，背景執行），逐一用 ffmpeg 擷取畫面檢查（指令範例：`ffmpeg -v error -y -i <影片> -vf "select='not(mod(n\,30))',scale=240:-2,tile=4x1" -frames:v 1 <圖檔>`），不理想就改 `modules/<id>/module.json` 的 promptTemplate 後重產；更新說明書（Claude 文件 https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh ，加入細節欄位與五個新模組）與 README；推送、開 PR、合併。
+
+### 待使用者決定（D5 結束時用選項詢問，列優缺點）
+
+1. 專案根目錄有使用者放的 `vedioFactory 使用說明書.md`（說明書匯出檔，含 Tailscale 網址與個人資料夾路徑）。GitHub 專案是**公開**的，所以我把它移出提交、未推送。選項：加入 .gitignore 只留本機／移除個人資訊後提交／原樣提交。
+2. `modules/dance/module.json` 的負面提示詞在磁碟上被改掉了（移除「倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content」），不是我改的。我沒有還原也沒有提交。需請使用者確認是否為刻意修改；其他七個模組仍保留排除條款。
+
+### 給壓縮後的自己
+
+- 使用者看不懂英文：回覆、工具步驟說明（description）、PR、commit 全部台灣中文。
+- 需要決策一律用選項詢問並列優缺點。
+- Docker 版正在 8000 埠執行（`docker compose ps`）；改了程式後要 `docker compose up --build -d` 才會更新。Tailscale：https://desktop-77qk2tg.taild30d3d.ts.net:8443。
 
 ## 下一步候選（待規畫）
 
