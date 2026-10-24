@@ -109,7 +109,7 @@
     "description": "走秀影片，直式 5 秒。",
     "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，表情{expression}，在{scene}，{action}，從頭到腳完整出現在畫面中，{lighting}，{style}，高畫質",
     "storyTemplate": "{person}穿著{outfit}在{scene}走秀，{action}。",
-    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
     "videoModelId": "wan-2.2-ti2v-5b",
     "seedMode": "random",
     "settings": {
