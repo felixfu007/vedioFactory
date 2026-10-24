@@ -60,7 +60,6 @@ PR #8（疊在 #7 上）。
 #7、#10（取代被自動關閉的 #8）、#9 已合併到 main。
 
 環境：本機 RTX 5070 Ti 16GB、ComfyUI 0.39 在 127.0.0.1:8188 執行；已安裝 wan2.2_ti2v_5B_fp16、wan2.2_vae、umt5_xxl_fp8 文字編碼器、Wan Animate 2。
-注意：本機另有 NSFW 類 LoRA，場景模組工作流不得載入任何 LoRA，負面提示詞需排除裸露／色情。
 
 ### 場景模組（分支 `feature/scenario-modules`）
 
@@ -86,9 +85,32 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 
 - Docker：本機已用 `docker compose up --build -d` 執行（開機自動重啟），透過 `.env` 與 npm start 共用影片庫、預設、ComfyUI models；容器經 host.docker.internal 連到主機 ComfyUI（實測可連，ComfyUI 不需改 --listen）。
 - Tailscale：`tailscale serve --bg --https=8443 http://127.0.0.1:8000`（tailnet only），網址 https://desktop-77qk2tg.taild30d3d.ts.net:8443；443 埠原有服務（轉 3000）未變動；實測頁面、同源寫入正常、跨來源寫入被擋。
-- Civitai：`lib/model-installer.js`＋網頁區塊；只收 .safetensors、掃描須通過、SHA-256 驗證、不覆蓋、一次一個；拒絕 nsfw／poi／minor 模型；顯示商用授權。實測真實 Civitai 查詢與 36 MB LoRA 下載安裝（暫存資料夾）成功；Docker 內可寫入 ComfyUI models。
+- Civitai：`lib/model-installer.js`＋網頁區塊；只收 .safetensors、掃描須通過、SHA-256 驗證、不覆蓋、一次一個；顯示商用授權。實測真實 Civitai 查詢與 36 MB LoRA 下載安裝（暫存資料夾）成功；Docker 內可寫入 ComfyUI models。
 - 使用說明書（Claude 文件）：https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh
 - 待使用者回覆：預先安裝哪些常見客戶需求的場景模組、是否做「結構化細節欄位」（穿著／表情／動作／鏡頭／光線）。
+
+## 目前工作：細節欄位與人物類模組（2026-10-24 使用者決定，分支 `feature/detail-fields-people`）
+
+使用者選擇：細節欄位做成「選單加自填」；預裝人物類模組：藝人形象、活動形象、寫真攝影、人物介紹、體育競技。
+注意：人物皆為 AI 虛構，提示詞不得寫真實藝人姓名；寫真攝影排除裸露與性感暗示。
+
+- [x] D1 細節欄位：`modules/_shared/fields.json` 共用欄位庫，module.json `fields` 用 `use` 引用並覆寫；後端 `validateFieldDefinition`，`/api/scenario-modules` 回傳 `fields`。（未做「使用者預設記住 scenarioModuleId」：使用者另存的預設是已填好的文字，不含變數，不需要。）
+- [x] D2 前端：`readPresetVariableValues()`、`createVariableField()`；下拉選單＋「自訂…」（值 `__custom__`）；修正「切換預設時沿用上一個預設的輸入值」（用 `presetVariables.dataset.presetId` 判斷）。
+- [x] D3 跳舞／走秀／健身房改用細節欄位（變數 person 取代 dancer/model/athlete）。
+- [x] D4 五個人物模組：talent（直式）、event（橫式）、portrait（直式）、profile（橫式）、sports（橫式），只有 AI 工作流沒有 Canvas。產生器：暫存區 `gen_modules2.py`（已用完，模組檔已提交）。
+- 提交：`ab8af9f`（本機分支，尚未推送）。`npm run test:all` 全部通過。
+- [ ] D5 用 GPU 產生五個新模組的範例影片：`node tools/generate-examples.mjs --only talent,event,portrait,profile,sports`（約 30 分鐘，背景執行），逐一用 ffmpeg 擷取畫面檢查（指令範例：`ffmpeg -v error -y -i <影片> -vf "select='not(mod(n\,30))',scale=240:-2,tile=4x1" -frames:v 1 <圖檔>`），不理想就改 `modules/<id>/module.json` 的 promptTemplate 後重產；更新說明書（Claude 文件 https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh ，加入細節欄位與五個新模組）與 README；推送、開 PR、合併。
+
+### 已處理的決定（2026-10-24）
+
+- 說明書匯出檔 `vedioFactory 使用說明書.md`：使用者選「只留在本機」，已加入 .gitignore。
+
+### 給壓縮後的自己
+
+- 使用者看不懂英文：回覆、工具步驟說明（description）、PR、commit 全部台灣中文。
+- 需要決策一律用選項詢問並列優缺點。
+- 我的思考內容也要用中文（使用者看得到）；英文錯誤訊息要翻成中文說明。
+- Docker 版正在 8000 埠執行（`docker compose ps`）；改了程式後要 `docker compose up --build -d` 才會更新。Tailscale：https://desktop-77qk2tg.taild30d3d.ts.net:8443。
 
 ## 下一步候選（待規畫）
 

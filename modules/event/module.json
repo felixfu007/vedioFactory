@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "id": "event",
+  "name": "活動形象影片",
+  "description": "記者會、發表會、年會、音樂節等活動的形象短片：主持人或來賓在活動現場的畫面。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "活動",
+    "宣傳"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 文生影片，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "活動形象影片（Wan 2.2 文生影片）",
+    "defaults": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "camera"
+    },
+    {
+      "use": "angle"
+    },
+    {
+      "use": "movement",
+      "default": "鏡頭緩慢拉遠"
+    },
+    {
+      "use": "person",
+      "label": "人物",
+      "default": "一位活動主持人"
+    },
+    {
+      "use": "outfit",
+      "default": "深藍色西裝外套與白色襯衫"
+    },
+    {
+      "use": "expression",
+      "default": "開心地大笑"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "站在舞台上張開雙手歡迎來賓",
+        "拿著麥克風向觀眾揮手",
+        "在活動背板前擺出姿勢",
+        "與來賓握手寒暄"
+      ],
+      "default": "站在舞台上張開雙手歡迎來賓"
+    },
+    {
+      "name": "scene",
+      "label": "活動現場",
+      "type": "select",
+      "options": [
+        "大型記者會舞台，背後有大型 LED 螢幕",
+        "新品發表會展台",
+        "企業年會宴會廳",
+        "戶外音樂節舞台"
+      ],
+      "default": "大型記者會舞台，背後有大型 LED 螢幕"
+    },
+    {
+      "use": "lighting",
+      "default": "舞台聚光燈"
+    },
+    {
+      "use": "style"
+    }
+  ],
+  "preset": {
+    "description": "活動形象影片，橫式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，在{scene}，{action}，表情{expression}，現場氣氛熱烈，{lighting}，{style}，高畫質",
+    "storyTemplate": "{person}在{scene}，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "camera": "中景半身",
+      "angle": "正面",
+      "movement": "鏡頭緩慢拉遠",
+      "person": "一位活動主持人",
+      "outfit": "深藍色西裝外套與白色襯衫",
+      "expression": "開心地大笑",
+      "action": "站在舞台上張開雙手歡迎來賓",
+      "scene": "大型記者會舞台，背後有大型 LED 螢幕",
+      "lighting": "舞台聚光燈",
+      "style": "商業廣告質感"
+    },
+    "seed": 20261102
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}

@@ -246,7 +246,7 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
   const page = await browser.newPage();
   try {
     await page.goto(origin, { waitUntil: 'networkidle0' });
-    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 5);
+    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 10);
     await page.select('#presetSelect', preset.id);
     await page.waitForSelector('#presetVariables input[data-variable="product"]');
     await page.type('#presetVariables input[data-variable="product"]', '新款耳機');
@@ -342,7 +342,7 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
     await page.select('#jobStatusFilter', 'active');
     assert.equal(await page.$eval('#jobsTable', (table) => table.hidden), true);
     assert.equal(await page.$eval('#jobsEmpty', (empty) => empty.textContent), '沒有符合篩選條件的工作。');
-    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 5);
+    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 10);
     const optionValues = (selector) => page.$$eval(`${selector} option`, (options) => options.map((option) => option.value));
     assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');
     assert.ok((await optionValues('#resolutionInput')).includes('custom'));
@@ -386,9 +386,9 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
 }
 
 const SCENARIO_MODULES = [
-  { id: 'dance', resolution: '1280x704', variable: 'dancer' },
-  { id: 'runway', resolution: '704x1280', variable: 'model' },
-  { id: 'gym', resolution: '1280x704', variable: 'athlete' },
+  { id: 'dance', resolution: '1280x704', variable: 'person' },
+  { id: 'runway', resolution: '704x1280', variable: 'person' },
+  { id: 'gym', resolution: '1280x704', variable: 'person' },
 ];
 
 // Samples two frames of a stored video in the page and reports brightness and how much the picture changed.
@@ -443,6 +443,15 @@ async function runScenarioModulesScenario(browser, origin, managedOutputDir) {
       const prefilled = await page.$eval(`#presetVariables input[data-variable="${scenario.variable}"]`, (input) => input.value);
       assert.ok(prefilled.length > 0, `${scenario.id} example variables should prefill`);
       assert.equal(await page.$eval('#updatePresetButton', (button) => button.disabled), true);
+      if (scenario.id === 'dance') {
+        // 下拉選單欄位：選「自訂…」後文字框出現，自訂內容會進入提示詞。
+        assert.equal(await page.$eval('#presetVariables select[data-variable="danceStyle"]', (select) => select.value), '街舞');
+        assert.equal(await page.$eval('#presetVariables [data-variable-custom="danceStyle"]', (input) => input.hidden), true);
+        await page.select('#presetVariables select[data-variable="danceStyle"]', '__custom__');
+        assert.equal(await page.$eval('#presetVariables [data-variable-custom="danceStyle"]', (input) => input.hidden), false);
+        await page.type('#presetVariables [data-variable-custom="danceStyle"]', '霹靂舞');
+        await page.select('#presetVariables select[data-variable="camera"]', '中景半身');
+      }
       await page.click('#applyPresetButton');
       await page.waitForFunction(() => document.querySelector('#presetStatus').textContent.startsWith('已套用'));
       const applied = await page.evaluate(() => ({
@@ -456,11 +465,17 @@ async function runScenarioModulesScenario(browser, origin, managedOutputDir) {
       assert.equal(applied.workflowId, `module-${scenario.id}`);
       assert.equal(applied.resolution, scenario.resolution);
       assert.ok(applied.prompt.includes(prefilled), applied.prompt);
+      if (scenario.id === 'dance') {
+        assert.ok(applied.prompt.includes('跳霹靂舞') && applied.prompt.startsWith('中景半身'), applied.prompt);
+      }
       assert.equal(applied.status.includes('尚未填入'), false, applied.status);
 
       await page.$eval('#durationInput', (input) => { input.value = '2'; });
       await page.click('#generateButton');
-      await page.waitForFunction((count) => document.querySelectorAll('.video-card').length === count, { timeout: 30_000 }, index + 1);
+      await page.waitForFunction((count) => document.querySelectorAll('.video-card').length === count, { timeout: 30_000 }, index + 1).catch(async (error) => {
+        console.error('除錯', scenario.id, await page.$eval('#generationStatus', (status) => status.textContent), await page.evaluate(() => [...document.querySelectorAll('#generationForm :invalid')].map((el) => `${el.id}=${el.value} ${el.validationMessage}`)));
+        throw error;
+      });
       const stored = (await fetch(`${origin}/api/videos`).then((response) => response.json()))
         .find((item) => item.moduleId === `scenario-${scenario.id}`);
       assert.ok(stored, `${scenario.id} video should be stored`);

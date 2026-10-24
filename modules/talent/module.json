@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "id": "talent",
+  "name": "藝人形象影片",
+  "description": "藝人或網紅的形象宣傳短片：時尚造型、眼神與姿態，適合社群直式影片。人物由 AI 虛構。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "藝人",
+    "形象"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 文生影片，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "藝人形象影片（Wan 2.2 文生影片）",
+    "defaults": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "camera"
+    },
+    {
+      "use": "angle"
+    },
+    {
+      "use": "movement",
+      "default": "鏡頭緩慢推近"
+    },
+    {
+      "use": "person",
+      "label": "藝人",
+      "default": "一位二十多歲的亞洲女性藝人"
+    },
+    {
+      "use": "outfit",
+      "default": "黑色亮面皮外套搭配銀色飾品"
+    },
+    {
+      "use": "expression"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "緩緩轉頭看向鏡頭並露出微笑",
+        "撥動頭髮後看向鏡頭",
+        "雙手插口袋自信地向前走",
+        "對鏡頭揮手打招呼"
+      ],
+      "default": "緩緩轉頭看向鏡頭並露出微笑"
+    },
+    {
+      "name": "scene",
+      "label": "背景",
+      "type": "select",
+      "options": [
+        "霓虹燈光的城市夜景",
+        "純色背景攝影棚",
+        "演唱會後台走廊",
+        "屋頂露台"
+      ],
+      "default": "霓虹燈光的城市夜景"
+    },
+    {
+      "use": "lighting",
+      "default": "戲劇性側光"
+    },
+    {
+      "use": "style",
+      "default": "時尚雜誌質感"
+    }
+  ],
+  "preset": {
+    "description": "藝人形象影片，直式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，{expression}，{action}，背景是{scene}，{lighting}，{style}，形象宣傳影片，高畫質",
+    "storyTemplate": "{person}的形象宣傳短片，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "camera": "中景半身",
+      "angle": "正面",
+      "movement": "鏡頭緩慢推近",
+      "person": "一位二十多歲的亞洲女性藝人",
+      "outfit": "黑色亮面皮外套搭配銀色飾品",
+      "expression": "自信的微笑",
+      "action": "緩緩轉頭看向鏡頭並露出微笑",
+      "scene": "霓虹燈光的城市夜景",
+      "lighting": "戲劇性側光",
+      "style": "時尚雜誌質感"
+    },
+    "seed": 20261101
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}

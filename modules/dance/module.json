@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "dance",
   "name": "跳舞影片",
-  "description": "舞者在舞台上隨節奏跳舞。Canvas 預覽會畫出隨節拍換動作的舞者與舞台燈光；ComfyUI 版本用 Wan 2.2 產生真實舞蹈影片。",
-  "version": "1.0.0",
+  "description": "舞者在舞台上隨節奏跳舞。可指定舞風、舞步、穿著、表情、場景與燈光。",
+  "version": "1.1.0",
   "tags": [
     "人物",
     "舞蹈",
@@ -43,11 +43,77 @@
       "duration": 5
     }
   },
+  "fields": [
+    {
+      "use": "camera",
+      "default": "遠景全身"
+    },
+    {
+      "use": "angle"
+    },
+    {
+      "use": "movement"
+    },
+    {
+      "use": "person",
+      "label": "舞者",
+      "default": "一位二十多歲的年輕舞者"
+    },
+    {
+      "use": "outfit",
+      "default": "白色寬鬆上衣、黑色工裝褲與白色球鞋"
+    },
+    {
+      "use": "expression"
+    },
+    {
+      "name": "danceStyle",
+      "label": "舞風",
+      "type": "select",
+      "options": [
+        "街舞",
+        "爵士舞",
+        "韓流舞蹈",
+        "現代舞",
+        "拉丁舞",
+        "芭蕾舞"
+      ],
+      "default": "街舞"
+    },
+    {
+      "name": "action",
+      "label": "舞步",
+      "type": "select",
+      "options": [
+        "大幅擺動手臂並快速踏步",
+        "連續轉圈後定格",
+        "原地跳躍並揮動雙手",
+        "滑步移動後停在結束動作"
+      ],
+      "default": "大幅擺動手臂並快速踏步"
+    },
+    {
+      "name": "scene",
+      "label": "場景",
+      "type": "select",
+      "options": [
+        "霓虹燈光的舞台",
+        "街頭塗鴉牆前",
+        "明亮的舞蹈教室",
+        "演唱會大舞台"
+      ],
+      "default": "霓虹燈光的舞台"
+    },
+    {
+      "use": "lighting",
+      "default": "舞台聚光燈"
+    }
+  ],
   "preset": {
-    "description": "舞台舞蹈表演，橫式 5 秒。",
-    "promptTemplate": "一位{dancer}在{stage}上跳{style}，全身入鏡，動作流暢有節奏，手臂與腿部大幅擺動，舞台燈光隨節拍變化，固定機位，電影感畫面，高畫質",
-    "storyTemplate": "{dancer}在{stage}跳{style}，從開場姿勢進入連續舞步，最後停在結束動作。",
-    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "description": "跳舞影片，橫式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，帶著{expression}，在{scene}跳{danceStyle}，{action}，從頭到腳完整出現在畫面中，動作流暢有節奏，{lighting}，電影感畫面，高畫質",
+    "storyTemplate": "{person}在{scene}跳{danceStyle}，從開場姿勢進入連續舞步，最後停在結束動作。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多",
     "videoModelId": "wan-2.2-ti2v-5b",
     "seedMode": "random",
     "settings": {
@@ -61,14 +127,21 @@
   },
   "example": {
     "variables": {
-      "dancer": "穿著白色上衣與黑色長褲的年輕舞者",
-      "stage": "霓虹燈光的舞台",
-      "style": "街舞"
+      "camera": "遠景全身",
+      "angle": "正面",
+      "movement": "固定機位",
+      "person": "一位二十多歲的年輕舞者",
+      "outfit": "白色寬鬆上衣、黑色工裝褲與白色球鞋",
+      "expression": "自信的微笑",
+      "danceStyle": "街舞",
+      "action": "大幅擺動手臂並快速踏步",
+      "scene": "霓虹燈光的舞台",
+      "lighting": "舞台聚光燈"
     },
     "seed": 20261023
   },
   "safety": {
     "requiresPersonConsent": true,
-    "notes": "若加入真人照片作為來源，必須取得照片中人物的同意，且不得用於冒充、誤導或任何不雅內容。"
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
   }
 }

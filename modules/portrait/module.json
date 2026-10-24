@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "id": "portrait",
+  "name": "寫真攝影影片",
+  "description": "寫真風格的人物短片：柔和光線、細膩表情與輕微動作，適合攝影工作室作品集。人物由 AI 虛構，不含裸露或性感暗示。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "寫真",
+    "攝影"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 文生影片，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "寫真攝影影片（Wan 2.2 文生影片）",
+    "defaults": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "camera",
+      "default": "近景胸像"
+    },
+    {
+      "use": "angle",
+      "default": "斜側 45 度"
+    },
+    {
+      "use": "movement",
+      "default": "鏡頭緩慢推近"
+    },
+    {
+      "use": "person",
+      "default": "一位二十多歲的亞洲女性"
+    },
+    {
+      "use": "outfit",
+      "default": "米白色針織上衣"
+    },
+    {
+      "use": "expression",
+      "default": "溫柔平靜"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "輕輕撥動頭髮後看向鏡頭",
+        "微微側頭露出淺淺微笑",
+        "在微風中閉上眼睛再慢慢睜開",
+        "低頭後抬起頭看向遠方"
+      ],
+      "default": "輕輕撥動頭髮後看向鏡頭"
+    },
+    {
+      "name": "scene",
+      "label": "場景",
+      "type": "select",
+      "options": [
+        "灑滿陽光的窗邊",
+        "花海之中",
+        "海邊沙灘",
+        "復古咖啡館"
+      ],
+      "default": "灑滿陽光的窗邊"
+    },
+    {
+      "use": "lighting",
+      "default": "黃金時段夕陽光"
+    },
+    {
+      "use": "style",
+      "options": [
+        "日系清新寫真",
+        "時尚雜誌質感",
+        "電影感",
+        "復古底片風格"
+      ],
+      "default": "日系清新寫真"
+    }
+  ],
+  "preset": {
+    "description": "寫真攝影影片，直式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，{expression}，{action}，在{scene}，{lighting}，{style}，淺景深，膚質細膩自然，高畫質",
+    "storyTemplate": "{person}在{scene}的寫真短片，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "camera": "近景胸像",
+      "angle": "斜側 45 度",
+      "movement": "鏡頭緩慢推近",
+      "person": "一位二十多歲的亞洲女性",
+      "outfit": "米白色針織上衣",
+      "expression": "溫柔平靜",
+      "action": "輕輕撥動頭髮後看向鏡頭",
+      "scene": "灑滿陽光的窗邊",
+      "lighting": "黃金時段夕陽光",
+      "style": "日系清新寫真"
+    },
+    "seed": 20261103
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}

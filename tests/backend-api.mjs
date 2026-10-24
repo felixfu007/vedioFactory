@@ -53,7 +53,6 @@ async function startMockCivitai() {
     id,
     name: `測試模型 ${id}`,
     type: 'LORA',
-    nsfw: false,
     poi: false,
     minor: false,
     allowCommercialUse: ['Image', 'Rent'],
@@ -64,7 +63,6 @@ async function startMockCivitai() {
   });
   const models = {
     100: model(100),
-    101: model(101, { nsfw: true }),
     102: model(102, { poi: true }),
     103: model(103, {}, 'old-format.ckpt'),
     104: model(104),
@@ -559,7 +557,6 @@ async function main() {
       ['https://evil.example/models/100', 400, /civitai\.com/],
       ['not a url', 400, /完整/],
       ['https://civitai.com/images/5', 400, /看不懂/],
-      ['https://civitai.com/models/101', 403, /成人內容/],
       ['https://civitai.com/models/102', 403, /真實人物/],
       ['https://civitai.com/models/103', 400, /safetensors/],
       ['https://civitai.com/models/999', 404, /找不到/],
@@ -827,6 +824,11 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       version: '1.0.0',
       tags: ['人物', '舞蹈'],
       canvas: { entry: 'preview.js', tagline: '舞蹈預覽' },
+      fields: [
+        { use: 'camera', default: '遠景全身' },
+        { name: 'dancer', label: '舞者', type: 'text', default: '年輕舞者', help: '寫外型' },
+        { name: 'style', label: '舞風', type: 'select', options: ['街舞', '爵士舞', '街舞'] },
+      ],
       workflow: {
         file: 'workflow.json',
         resolutions: ['1280x704', '704x1280'],
@@ -838,7 +840,6 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       },
       preset: {
         promptTemplate: '{dancer} 在舞台上跳{style}',
-        negativePrompt: 'nsfw',
         seedMode: 'fixed',
         seed: 2026,
         settings: { resolution: '1280x704', fps: 24, duration: 5 },
@@ -846,6 +847,13 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       safety: { requiresPersonConsent: true, notes: '使用真人照片需取得本人同意。' },
     }));
     await fs.mkdir(path.join(modulesDir, '_shared'));
+    await fs.writeFile(path.join(modulesDir, '_shared', 'fields.json'), JSON.stringify({
+      fields: { camera: { label: '鏡頭遠近', type: 'select', options: ['遠景全身', '中景半身'], default: '中景半身' } },
+    }));
+    await fs.mkdir(path.join(modulesDir, 'bad-fields'));
+    await fs.writeFile(path.join(modulesDir, 'bad-fields', 'module.json'), JSON.stringify({
+      id: 'bad-fields', name: '欄位錯誤', fields: [{ use: 'not-shared' }],
+    }));
     await fs.mkdir(path.join(modulesDir, 'wrong-id'));
     await fs.writeFile(path.join(modulesDir, 'wrong-id', 'module.json'), JSON.stringify({ id: 'other', name: 'x' }));
     await fs.mkdir(path.join(modulesDir, 'missing-canvas'));
@@ -882,7 +890,8 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
 
       // Scenario modules: discovery, errors, assets, workflow registration and built-in presets.
       const scenarioModules = await fetch(`${comfyAppOrigin}/api/scenario-modules`).then((response) => response.json());
-      assert.deepEqual(scenarioModules.map((item) => item.id).sort(), ['demo-dance', 'missing-canvas', 'wrong-id']);
+      assert.deepEqual(scenarioModules.map((item) => item.id).sort(), ['bad-fields', 'demo-dance', 'missing-canvas', 'wrong-id']);
+      assert.match(scenarioModules.find((item) => item.id === 'bad-fields').error, /not-shared/);
       const demoModule = scenarioModules.find((item) => item.id === 'demo-dance');
       assert.equal(demoModule.error, '');
       assert.equal(demoModule.workflowId, 'module-demo-dance');
@@ -890,6 +899,11 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       assert.equal(demoModule.canvas.url, '/scenario-modules/demo-dance/preview.js');
       assert.equal(demoModule.canvas.moduleId, 'scenario-demo-dance');
       assert.equal(demoModule.safety.requiresPersonConsent, true);
+      assert.deepEqual(demoModule.fields, [
+        { name: 'camera', label: '鏡頭遠近', type: 'select', options: ['遠景全身', '中景半身'], default: '遠景全身', help: '' },
+        { name: 'dancer', label: '舞者', type: 'text', options: [], default: '年輕舞者', help: '寫外型' },
+        { name: 'style', label: '舞風', type: 'select', options: ['街舞', '爵士舞'], default: '', help: '' },
+      ]);
       assert.equal('manifestPath' in demoModule, false);
       assert.match(scenarioModules.find((item) => item.id === 'wrong-id').error, /資料夾名稱/);
       assert.match(scenarioModules.find((item) => item.id === 'missing-canvas').error, /nope\.js/);

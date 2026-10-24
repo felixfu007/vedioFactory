@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "gym",
   "name": "健身房影片",
-  "description": "健身者在健身房做訓練動作。Canvas 預覽會畫出深蹲動作、次數計數與健身房背景；ComfyUI 版本用 Wan 2.2 產生真實健身影片。",
-  "version": "1.0.0",
+  "description": "健身者在健身房做訓練動作。可指定訓練項目、動作節奏、穿著、表情與場地。",
+  "version": "1.1.0",
   "tags": [
     "人物",
     "健身",
@@ -43,11 +43,76 @@
       "duration": 5
     }
   },
+  "fields": [
+    {
+      "use": "camera",
+      "default": "遠景全身"
+    },
+    {
+      "use": "angle",
+      "default": "側面"
+    },
+    {
+      "use": "movement"
+    },
+    {
+      "use": "person",
+      "label": "健身者",
+      "default": "一位健身教練"
+    },
+    {
+      "use": "outfit",
+      "default": "運動背心與運動短褲"
+    },
+    {
+      "use": "expression",
+      "default": "專注認真"
+    },
+    {
+      "name": "exercise",
+      "label": "訓練項目",
+      "type": "select",
+      "options": [
+        "槓鈴深蹲，雙手握住扛在肩上的槓鈴，緩慢下蹲再站起",
+        "啞鈴肩推，雙手把啞鈴從肩膀推高過頭",
+        "伏地挺身，身體保持一直線上下起伏",
+        "跳繩，雙腳輕快地連續跳躍",
+        "拳擊沙袋，左右拳連續出拳"
+      ],
+      "default": "槓鈴深蹲，雙手握住扛在肩上的槓鈴，緩慢下蹲再站起"
+    },
+    {
+      "name": "action",
+      "label": "節奏",
+      "type": "select",
+      "options": [
+        "連續完成多次標準動作",
+        "以慢動作展示動作細節",
+        "完成最後一下後露出成就感的表情"
+      ],
+      "default": "連續完成多次標準動作"
+    },
+    {
+      "name": "scene",
+      "label": "場地",
+      "type": "select",
+      "options": [
+        "現代健身房中央，背景有健身器材與鏡子",
+        "戶外運動場",
+        "拳擊訓練館"
+      ],
+      "default": "現代健身房中央，背景有健身器材與鏡子"
+    },
+    {
+      "use": "lighting",
+      "default": "明亮自然光"
+    }
+  ],
   "preset": {
-    "description": "健身房重量訓練，橫式 5 秒。",
-    "promptTemplate": "遠景側面拍攝，一位{athlete}在現代健身房中央做{exercise}，從頭到腳完整出現在畫面中，雙手握住扛在肩上的槓鈴，緩慢下蹲再站起，重複多次，動作標準有力，背景有健身器材與鏡子，明亮自然光，固定機位，運動廣告質感，高畫質",
-    "storyTemplate": "{athlete}在健身房做{exercise}，連續完成多次標準動作。",
-    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "description": "健身房影片，橫式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，在{scene}做{exercise}，{action}，表情{expression}，從頭到腳完整出現在畫面中，動作標準有力，{lighting}，運動廣告質感，高畫質",
+    "storyTemplate": "{person}在{scene}做訓練，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
     "videoModelId": "wan-2.2-ti2v-5b",
     "seedMode": "random",
     "settings": {
@@ -61,13 +126,21 @@
   },
   "example": {
     "variables": {
-      "athlete": "穿著運動背心與運動短褲的健身教練",
-      "exercise": "槓鈴深蹲"
+      "camera": "遠景全身",
+      "angle": "側面",
+      "movement": "固定機位",
+      "person": "一位健身教練",
+      "outfit": "運動背心與運動短褲",
+      "expression": "專注認真",
+      "exercise": "槓鈴深蹲，雙手握住扛在肩上的槓鈴，緩慢下蹲再站起",
+      "action": "連續完成多次標準動作",
+      "scene": "現代健身房中央，背景有健身器材與鏡子",
+      "lighting": "明亮自然光"
     },
     "seed": 20261025
   },
   "safety": {
     "requiresPersonConsent": true,
-    "notes": "若加入真人照片作為來源，必須取得照片中人物的同意，且不得用於冒充、誤導或任何不雅內容。"
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
   }
 }

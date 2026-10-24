@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "runway",
   "name": "走秀影片",
-  "description": "模特兒在伸展台上朝鏡頭走秀。Canvas 預覽會畫出透視伸展台、台步與閃光燈；ComfyUI 版本用 Wan 2.2 產生直式走秀影片。",
-  "version": "1.0.0",
+  "description": "模特兒在伸展台上走秀。可指定服裝、台步、表情、場地與燈光。",
+  "version": "1.1.0",
   "tags": [
     "人物",
     "時尚",
@@ -43,11 +43,73 @@
       "duration": 5
     }
   },
+  "fields": [
+    {
+      "use": "camera",
+      "default": "遠景全身"
+    },
+    {
+      "use": "angle"
+    },
+    {
+      "use": "movement"
+    },
+    {
+      "use": "person",
+      "label": "模特兒",
+      "default": "一位高挑的時裝模特兒"
+    },
+    {
+      "use": "outfit",
+      "label": "服裝",
+      "default": "剪裁俐落的黑色西裝外套與寬褲"
+    },
+    {
+      "use": "expression",
+      "options": [
+        "冷靜自信",
+        "自信的微笑",
+        "高冷沒有表情",
+        "堅定有力"
+      ],
+      "default": "冷靜自信"
+    },
+    {
+      "name": "action",
+      "label": "台步",
+      "type": "select",
+      "options": [
+        "朝鏡頭走來並在台前停下擺姿勢",
+        "以自信台步走過伸展台",
+        "走到台前轉身後離開"
+      ],
+      "default": "朝鏡頭走來並在台前停下擺姿勢"
+    },
+    {
+      "name": "scene",
+      "label": "場地",
+      "type": "select",
+      "options": [
+        "時裝秀伸展台，兩側坐滿觀眾與相機閃光燈",
+        "戶外花園伸展台",
+        "極簡白色攝影棚"
+      ],
+      "default": "時裝秀伸展台，兩側坐滿觀眾與相機閃光燈"
+    },
+    {
+      "use": "lighting",
+      "default": "舞台聚光燈"
+    },
+    {
+      "use": "style",
+      "default": "時尚雜誌質感"
+    }
+  ],
   "preset": {
-    "description": "時裝秀伸展台走秀，直式 5 秒。",
-    "promptTemplate": "一位{model}穿著{outfit}，在時裝秀伸展台上朝鏡頭走來，自信的台步，全身入鏡，兩側觀眾與相機閃光燈，聚光燈照明，時尚大片質感，高畫質",
-    "storyTemplate": "{model}穿著{outfit}從伸展台後方走向鏡頭，在台前停下擺出姿勢。",
-    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "description": "走秀影片，直式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，表情{expression}，在{scene}，{action}，從頭到腳完整出現在畫面中，{lighting}，{style}，高畫質",
+    "storyTemplate": "{person}穿著{outfit}在{scene}走秀，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走",
     "videoModelId": "wan-2.2-ti2v-5b",
     "seedMode": "random",
     "settings": {
@@ -61,13 +123,21 @@
   },
   "example": {
     "variables": {
-      "model": "高挑的時裝模特兒",
-      "outfit": "剪裁俐落的黑色西裝外套與寬褲"
+      "camera": "遠景全身",
+      "angle": "正面",
+      "movement": "固定機位",
+      "person": "一位高挑的時裝模特兒",
+      "outfit": "剪裁俐落的黑色西裝外套與寬褲",
+      "expression": "冷靜自信",
+      "action": "朝鏡頭走來並在台前停下擺姿勢",
+      "scene": "時裝秀伸展台，兩側坐滿觀眾與相機閃光燈",
+      "lighting": "舞台聚光燈",
+      "style": "時尚雜誌質感"
     },
     "seed": 20261024
   },
   "safety": {
     "requiresPersonConsent": true,
-    "notes": "若加入真人照片作為來源，必須取得照片中人物的同意，且不得用於冒充、誤導或任何不雅內容。"
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
   }
 }

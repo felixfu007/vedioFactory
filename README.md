@@ -144,7 +144,7 @@ npm start
 
 網頁的「從 Civitai 安裝模型」區塊：貼上 civitai.com 的模型網址 → 按「查詢模型」確認名稱、類型、大小、觸發詞與**商用授權** → 按「下載並安裝」。檔案會依類型放進 ComfyUI 的 models 子資料夾（Checkpoint → `checkpoints`、LoRA → `loras` 等，可手動改成 `diffusion_models` 等），下載進度顯示在同一區塊，ComfyUI 不需重啟即可看到新模型。
 
-安全規則：只接受 `.safetensors`（舊式 `.ckpt`／`.pt` 載入時可能執行程式碼）、Civitai 安全掃描須通過、下載後比對 SHA-256、不覆蓋既有檔案、一次只下載一個；不提供自動安裝標示為成人內容、描繪特定真實人物（poi）或涉及未成年人的模型。作者未允許商用的模型會在安裝前提醒。需要登入才能下載的模型，請在 `.env` 設定 `VEDIO_FACTORY_CIVITAI_TOKEN`（Civitai 帳號設定中的 API Key）。
+安全規則：只接受 `.safetensors`（舊式 `.ckpt`／`.pt` 載入時可能執行程式碼）、Civitai 安全掃描須通過、下載後比對 SHA-256、不覆蓋既有檔案、一次只下載一個；作者未允許商用的模型會在安裝前提醒。需要登入才能下載的模型，請在 `.env` 設定 `VEDIO_FACTORY_CIVITAI_TOKEN`（Civitai 帳號設定中的 API Key）。
 
 ## 場景模組（跳舞、走秀、健身房）
 
