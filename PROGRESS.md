@@ -99,11 +99,13 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 - [x] D3 跳舞／走秀／健身房改用細節欄位（變數 person 取代 dancer/model/athlete）。
 - [x] D4 五個人物模組：talent（直式）、event（橫式）、portrait（直式）、profile（橫式）、sports（橫式），只有 AI 工作流沒有 Canvas。產生器：暫存區 `gen_modules2.py`（已用完，模組檔已提交）。
 - 提交：`ab8af9f`（本機分支，尚未推送）。`npm run test:all` 全部通過。
-- [ ] D5 用 GPU 產生五個新模組的範例影片：`node tools/generate-examples.mjs --only talent,event,portrait,profile,sports`（約 30 分鐘，背景執行），逐一用 ffmpeg 擷取畫面檢查（指令範例：`ffmpeg -v error -y -i <影片> -vf "select='not(mod(n\,30))',scale=240:-2,tile=4x1" -frames:v 1 <圖檔>`），不理想就改 `modules/<id>/module.json` 的 promptTemplate 後重產；更新說明書（Claude 文件 https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh ，加入細節欄位與五個新模組）與 README；推送、開 PR、合併。
+- [x] D5 五個新模組範例影片（2026-10-24 本機 GPU，每部約 5～6 分鐘，全部通過檢查，最高 83°C）：藝人形象（黑色亮面皮外套、轉頭微笑、霓虹夜景）、活動形象（主持人張開雙手、舞台）、寫真攝影（米白針織、窗邊陽光）、人物介紹（灰西裝主管、辦公室）、體育競技（田徑場衝刺、跟拍）。說明書與 README 已更新。
 
 ### 已處理的決定（2026-10-24）
 
 - 說明書匯出檔 `vedioFactory 使用說明書.md`：使用者選「只留在本機」，已加入 .gitignore。
+- 八個模組負面提示詞移除裸露／色情排除條款：使用者確認保留（客戶要求尊重設計師創作自由，另有人工評審）。
+- Civitai 安裝規則：使用者選「保留真人肖像（poi，只擋真實存在的特定人物，擬真虛構人物不受影響）與未成年人兩條」；成人內容（nsfw）改為只顯示提醒、不阻擋。使用者曾自行提交 5cee266 移除全部規則，之後經說明選擇此方案。**不要再移除 poi 與 minor 兩條規則**；提交前逐一檢查每個檔案的變更。
 
 ### 給壓縮後的自己
 

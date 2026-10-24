@@ -1580,6 +1580,7 @@
         : `商用：作者未允許商業使用產出內容（Civitai 授權：${info.license.commercialUse.join('、') || '無'}）；用於客戶專案前請先取得作者同意。`,
       false, !info.license.allowsCommercialOutputs],
       [info.license.allowNoCredit ? '' : '使用時需標示作者名稱。'],
+      ...(info.contentWarnings || []).map((warning) => [`提醒：${warning}`, false, true]),
       [info.modelsDirReady ? '' : '找不到 ComfyUI 的 models 資料夾，無法安裝；請設定 VEDIO_FACTORY_COMFYUI_MODELS_DIR。', false, true],
     ];
     ui.civitaiPreview.replaceChildren(...lines.filter(([text]) => text).map(([text, strong, warning]) => {
