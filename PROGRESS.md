@@ -101,14 +101,17 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 - 提交：`ab8af9f`（本機分支，尚未推送）。`npm run test:all` 全部通過。
 - [ ] D5 用 GPU 產生五個新模組的範例影片：`node tools/generate-examples.mjs --only talent,event,portrait,profile,sports`（約 30 分鐘，背景執行），逐一用 ffmpeg 擷取畫面檢查（指令範例：`ffmpeg -v error -y -i <影片> -vf "select='not(mod(n\,30))',scale=240:-2,tile=4x1" -frames:v 1 <圖檔>`），不理想就改 `modules/<id>/module.json` 的 promptTemplate 後重產；更新說明書（Claude 文件 https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh ，加入細節欄位與五個新模組）與 README；推送、開 PR、合併。
 
-### 待使用者決定（D5 結束時用選項詢問，列優缺點）
+### 已處理的決定（2026-10-24）
 
-1. 專案根目錄有使用者放的 `vedioFactory 使用說明書.md`（說明書匯出檔，含 Tailscale 網址與個人資料夾路徑）。GitHub 專案是**公開**的，所以我把它移出提交、未推送。選項：加入 .gitignore 只留本機／移除個人資訊後提交／原樣提交。
+- 說明書匯出檔 `vedioFactory 使用說明書.md`：使用者選「只留在本機」，已加入 .gitignore。
+- 八個模組負面提示詞移除「裸露、色情、性感暗示、nsfw」：使用者確認保留（客戶要求尊重設計師創作自由，另有人工評審審查），已提交。
+- 磁碟上有人刪除了 Civitai 安裝程式的三條拒絕規則（成人內容、真人肖像 poi、未成年人）及對應測試，我誤用「全部一起提交」把刪除包進 554cef4。已加回規則並還原測試；理由已向使用者說明：真人肖像可被用來偽造真人影片、未成年人有嚴重法律風險、成人模型安裝與時裝創作自由無關。**不要再移除這三條規則**；提交前要逐一檢查每個檔案的變更，不要直接全部加入。
 
 ### 給壓縮後的自己
 
 - 使用者看不懂英文：回覆、工具步驟說明（description）、PR、commit 全部台灣中文。
 - 需要決策一律用選項詢問並列優缺點。
+- 我的思考內容也要用中文（使用者看得到）；英文錯誤訊息要翻成中文說明。
 - Docker 版正在 8000 埠執行（`docker compose ps`）；改了程式後要 `docker compose up --build -d` 才會更新。Tailscale：https://desktop-77qk2tg.taild30d3d.ts.net:8443。
 
 ## 下一步候選（待規畫）
