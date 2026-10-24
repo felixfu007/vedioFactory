@@ -292,6 +292,15 @@ textarea {
   color: #ffc5cf;
 }
 
+.preset-field {
+  align-content: start;
+}
+
+.field-help {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .library-filters {
   margin-bottom: 1rem;
 }

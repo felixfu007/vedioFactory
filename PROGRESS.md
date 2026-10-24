@@ -60,7 +60,6 @@ PR #8（疊在 #7 上）。
 #7、#10（取代被自動關閉的 #8）、#9 已合併到 main。
 
 環境：本機 RTX 5070 Ti 16GB、ComfyUI 0.39 在 127.0.0.1:8188 執行；已安裝 wan2.2_ti2v_5B_fp16、wan2.2_vae、umt5_xxl_fp8 文字編碼器、Wan Animate 2。
-注意：本機另有 NSFW 類 LoRA，場景模組工作流不得載入任何 LoRA，負面提示詞需排除裸露／色情。
 
 ### 場景模組（分支 `feature/scenario-modules`）
 
@@ -86,9 +85,20 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 
 - Docker：本機已用 `docker compose up --build -d` 執行（開機自動重啟），透過 `.env` 與 npm start 共用影片庫、預設、ComfyUI models；容器經 host.docker.internal 連到主機 ComfyUI（實測可連，ComfyUI 不需改 --listen）。
 - Tailscale：`tailscale serve --bg --https=8443 http://127.0.0.1:8000`（tailnet only），網址 https://desktop-77qk2tg.taild30d3d.ts.net:8443；443 埠原有服務（轉 3000）未變動；實測頁面、同源寫入正常、跨來源寫入被擋。
-- Civitai：`lib/model-installer.js`＋網頁區塊；只收 .safetensors、掃描須通過、SHA-256 驗證、不覆蓋、一次一個；拒絕 nsfw／poi／minor 模型；顯示商用授權。實測真實 Civitai 查詢與 36 MB LoRA 下載安裝（暫存資料夾）成功；Docker 內可寫入 ComfyUI models。
+- Civitai：`lib/model-installer.js`＋網頁區塊；只收 .safetensors、掃描須通過、SHA-256 驗證、不覆蓋、一次一個；顯示商用授權。實測真實 Civitai 查詢與 36 MB LoRA 下載安裝（暫存資料夾）成功；Docker 內可寫入 ComfyUI models。
 - 使用說明書（Claude 文件）：https://claude.ai/artifact/7h9FKEp794oKJaMwAsDwXh
 - 待使用者回覆：預先安裝哪些常見客戶需求的場景模組、是否做「結構化細節欄位」（穿著／表情／動作／鏡頭／光線）。
+
+## 目前工作：細節欄位與人物類模組（2026-10-24 使用者決定，分支 `feature/detail-fields-people`）
+
+使用者選擇：細節欄位做成「選單加自填」；預裝人物類模組：藝人形象、活動形象、寫真攝影、人物介紹、體育競技。
+注意：人物皆為 AI 虛構，提示詞不得寫真實藝人姓名；寫真攝影排除裸露與性感暗示。
+
+- [ ] D1 細節欄位：`modules/_shared/fields.json` 共用欄位庫（鏡頭、角度、運鏡、表情、光線等），module.json `fields` 可用 `use` 引用並覆寫；後端驗證並在 `/api/scenario-modules` 回傳；預設可記住 `scenarioModuleId`。
+- [ ] D2 前端：預設變數依欄位定義顯示為下拉選單＋「自訂…」文字框，讀值統一由一個函式處理；測試更新。
+- [ ] D3 既有跳舞／走秀／健身房改用細節欄位。
+- [ ] D4 新增五個人物模組（僅 AI 工作流，不做 Canvas 預覽）：talent、event、portrait、profile、sports。
+- [ ] D5 用 GPU 各產生一部範例影片並逐一看畫面，必要時調整提示詞；更新說明書與 README；PR、合併。
 
 ## 下一步候選（待規畫）
 

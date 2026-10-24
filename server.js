@@ -37,6 +37,40 @@ const MODULE_ID_PATTERN = /^[a-z\d][a-z\d-]{0,40}$/u;
 const MODULE_PRESET_ID_PATTERN = /^module:[a-z\d][a-z\d-]{0,40}$/u;
 const MODULE_ASSET_PATTERN = /^[\w-]+(?:\.[\w-]+)*\.(?:js|json|png|jpe?g|webp|svg)$/u;
 const MAX_MODULE_MANIFEST_BYTES = 256 * 1024;
+const FIELD_NAME_PATTERN = /^[\p{L}\p{N}_]{1,40}$/u;
+const MAX_MODULE_FIELDS = 20;
+
+// 細節欄位：{ use?: 共用欄位名稱, name, label, type: 'text'|'select', options, default, help }。
+// use 會先帶入 modules/_shared/fields.json 的定義，再由模組自己的值覆寫。
+function validateFieldDefinition(field, sharedFields) {
+  if (!isPlainObject(field)) throw new Error('fields 的每一項都必須是物件。');
+  let base = {};
+  if (field.use !== undefined) {
+    base = sharedFields[field.use];
+    if (!isPlainObject(base)) throw new Error(`找不到共用欄位：${field.use}。`);
+  }
+  const merged = { ...base, ...field };
+  const name = String(merged.name ?? field.use ?? '');
+  if (!FIELD_NAME_PATTERN.test(name)) throw new Error(`欄位名稱無效：${name || '（空白）'}。`);
+  const type = merged.type ?? 'text';
+  if (!['text', 'select'].includes(type)) throw new Error(`欄位 ${name} 的 type 只能是 text 或 select。`);
+  let options = [];
+  if (type === 'select') {
+    if (!Array.isArray(merged.options) || !merged.options.length || merged.options.length > 30
+      || merged.options.some((option) => typeof option !== 'string' || !option.trim() || option.length > 100)) {
+      throw new Error(`欄位 ${name} 的 options 必須是 1 至 30 個、每個 100 字以內的文字。`);
+    }
+    options = [...new Set(merged.options.map((option) => option.trim()))];
+  }
+  return {
+    name,
+    label: readOptionalText(merged, 'label', `欄位 ${name} 的 label`, 20) || name,
+    type,
+    options,
+    default: readOptionalText(merged, 'default', `欄位 ${name} 的 default`, 200),
+    help: readOptionalText(merged, 'help', `欄位 ${name} 的 help`, 200),
+  };
+}
 const MAX_WORKFLOW_META_BYTES = 64 * 1024;
 const PRESET_SCHEMA_VERSION = 1;
 const MAX_PRESETS_PER_IMPORT = 500;
@@ -1050,7 +1084,19 @@ function createApp(options = {}) {
   }
 
   // Scenario modules: modules/<id>/module.json bundles a Canvas preview, a ComfyUI workflow and a preset.
-  async function readScenarioModule(id) {
+  async function readSharedFields() {
+    const sharedPath = path.join(modulesDir, '_shared', 'fields.json');
+    const text = await fs.readFile(sharedPath, 'utf8').catch(() => null);
+    if (text === null) return {};
+    try {
+      const shared = JSON.parse(text);
+      return isPlainObject(shared?.fields) ? shared.fields : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function readScenarioModule(id, sharedFields = {}) {
     const moduleDir = path.join(modulesDir, id);
     const manifestPath = path.join(moduleDir, 'module.json');
     const stats = await fs.stat(manifestPath).catch(() => null);
@@ -1119,6 +1165,17 @@ function createApp(options = {}) {
       }, capabilities);
     }
 
+    let fields = [];
+    if (manifest.fields !== undefined) {
+      if (!Array.isArray(manifest.fields) || manifest.fields.length > MAX_MODULE_FIELDS) {
+        throw new Error(`fields 必須是最多 ${MAX_MODULE_FIELDS} 個欄位的陣列。`);
+      }
+      fields = manifest.fields.map((field) => validateFieldDefinition(field, sharedFields));
+      const names = fields.map((field) => field.name);
+      const duplicate = names.find((name, index) => names.indexOf(name) !== index);
+      if (duplicate) throw new Error(`欄位名稱重複：${duplicate}。`);
+    }
+
     let example = null;
     if (manifest.example !== undefined) {
       if (!isPlainObject(manifest.example)) throw new Error('example 必須是物件。');
@@ -1148,6 +1205,7 @@ function createApp(options = {}) {
       canvas,
       workflow,
       preset,
+      fields,
       example,
       safety: {
         requiresPersonConsent: safety.requiresPersonConsent === true,
@@ -1163,6 +1221,7 @@ function createApp(options = {}) {
       throw error;
     });
     const scenarioModules = [];
+    const sharedFields = await readSharedFields();
     for (const entry of entries) {
       // Folders starting with "_" or "." hold shared assets, not modules.
       if (!entry.isDirectory() || /^[_.]/u.test(entry.name)) continue;
@@ -1171,7 +1230,7 @@ function createApp(options = {}) {
         continue;
       }
       try {
-        scenarioModules.push(await readScenarioModule(entry.name));
+        scenarioModules.push(await readScenarioModule(entry.name, sharedFields));
       } catch (error) {
         scenarioModules.push({ id: entry.name, name: entry.name, error: `場景模組無效：${error.message}` });
       }

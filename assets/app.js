@@ -1174,25 +1174,78 @@
     renderProjectOptions();
   }
 
-  function renderPresetVariables(preset) {
-    const variables = preset?.variables ?? [];
-    const previousValues = Object.fromEntries(
-      [...ui.presetVariables.querySelectorAll('input')].map((input) => [input.dataset.variable, input.value]),
-    );
-    const exampleValues = window.VedioFactory.scenarioModules
-      ?.find((item) => item.id === preset?.scenarioModuleId)?.example?.variables ?? {};
-    ui.presetVariables.replaceChildren(...variables.map((name) => {
-      const label = document.createElement('label');
-      label.textContent = `變數 {${name}}`;
+  const CUSTOM_OPTION = '__custom__';
+
+  // 讀取預設變數欄位目前的值：文字框直接取值；下拉選單選「自訂…」時取旁邊文字框的值。
+  function readPresetVariableValues() {
+    return Object.fromEntries([...ui.presetVariables.querySelectorAll('[data-variable]')].map((control) => {
+      if (control.tagName === 'SELECT' && control.value === CUSTOM_OPTION) {
+        return [control.dataset.variable, control.parentElement.querySelector('[data-variable-custom]').value.trim()];
+      }
+      return [control.dataset.variable, control.value.trim()];
+    }));
+  }
+
+  function createVariableField(name, field, value) {
+    const label = document.createElement('label');
+    label.className = 'preset-field';
+    label.append(field?.label || `變數 {${name}}`);
+    if (field?.type === 'select') {
+      const select = document.createElement('select');
+      select.dataset.variable = name;
+      field.options.forEach((option) => select.append(new Option(option, option)));
+      select.append(new Option('自訂…', CUSTOM_OPTION));
+      const custom = document.createElement('input');
+      custom.type = 'text';
+      custom.maxLength = 1000;
+      custom.placeholder = '輸入自訂內容';
+      custom.dataset.variableCustom = name;
+      const isOption = field.options.includes(value);
+      select.value = isOption || !value ? (isOption ? value : field.options[0]) : CUSTOM_OPTION;
+      custom.value = isOption ? '' : value;
+      custom.hidden = select.value !== CUSTOM_OPTION;
+      select.addEventListener('change', () => {
+        custom.hidden = select.value !== CUSTOM_OPTION;
+        if (!custom.hidden) custom.focus();
+      });
+      label.append(select, custom);
+    } else {
       const input = document.createElement('input');
       input.type = 'text';
       input.maxLength = 1000;
       input.dataset.variable = name;
-      input.value = previousValues[name] || exampleValues[name] || '';
+      input.value = value;
+      if (field?.help) input.placeholder = field.help;
       label.append(input);
-      return label;
-    }));
-    ui.presetVariables.hidden = variables.length === 0;
+    }
+    if (field?.help) {
+      const help = document.createElement('span');
+      help.className = 'field-help';
+      help.textContent = field.help;
+      label.append(help);
+    }
+    return label;
+  }
+
+  function renderPresetVariables(preset) {
+    const variables = preset?.variables ?? [];
+    // 只有重畫同一個預設時才保留已輸入的值；換成別的預設就從該預設的範例值與預設值開始。
+    const previousValues = ui.presetVariables.dataset.presetId === (preset?.id ?? '') ? readPresetVariableValues() : {};
+    ui.presetVariables.dataset.presetId = preset?.id ?? '';
+    const scenarioModule = window.VedioFactory.scenarioModules?.find((item) => item.id === preset?.scenarioModuleId);
+    const exampleValues = scenarioModule?.example?.variables ?? {};
+    const fields = new Map((scenarioModule?.fields ?? []).map((field) => [field.name, field]));
+    // 有細節欄位定義的依模組排列的順序顯示，其餘變數排在後面。
+    const ordered = [
+      ...[...fields.keys()].filter((name) => variables.includes(name)),
+      ...variables.filter((name) => !fields.has(name)),
+    ];
+    ui.presetVariables.replaceChildren(...ordered.map((name) => createVariableField(
+      name,
+      fields.get(name),
+      previousValues[name] || exampleValues[name] || fields.get(name)?.default || '',
+    )));
+    ui.presetVariables.hidden = ordered.length === 0;
   }
 
   function fillTemplate(template, values) {
@@ -1252,9 +1305,7 @@
   function applySelectedPreset() {
     const preset = getSelectedPreset();
     if (!preset) return;
-    const values = Object.fromEntries(
-      [...ui.presetVariables.querySelectorAll('input')].map((input) => [input.dataset.variable, input.value.trim()]),
-    );
+    const values = readPresetVariableValues();
     const missing = preset.variables.filter((name) => !values[name]);
     ui.promptInput.value = fillTemplate(preset.promptTemplate, values);
     ui.storyInput.value = fillTemplate(preset.storyTemplate, values);

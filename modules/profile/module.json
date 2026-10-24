@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "profile",
+  "name": "人物介紹影片",
+  "description": "企業主管、講師、員工的介紹短片開場畫面：專業形象與自然神情（沒有聲音與口型）。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "企業",
+    "介紹"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 文生影片，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "人物介紹影片（Wan 2.2 文生影片）",
+    "defaults": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "camera"
+    },
+    {
+      "use": "angle",
+      "default": "斜側 45 度"
+    },
+    {
+      "use": "movement"
+    },
+    {
+      "use": "person",
+      "default": "一位四十多歲的亞洲男性主管"
+    },
+    {
+      "use": "outfit",
+      "default": "深灰色西裝與白色襯衫"
+    },
+    {
+      "use": "expression"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "看向鏡頭微微點頭致意",
+        "雙手交叉在胸前自信地微笑",
+        "在白板前用手勢講解",
+        "坐在辦公桌前抬頭看向鏡頭"
+      ],
+      "default": "看向鏡頭微微點頭致意"
+    },
+    {
+      "name": "scene",
+      "label": "場景",
+      "type": "select",
+      "options": [
+        "明亮的現代辦公室",
+        "玻璃隔間的會議室",
+        "設計工作室",
+        "演講台"
+      ],
+      "default": "明亮的現代辦公室"
+    },
+    {
+      "use": "lighting"
+    },
+    {
+      "use": "style"
+    }
+  ],
+  "preset": {
+    "description": "人物介紹影片，橫式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}穿著{outfit}，{expression}，{action}，背景是{scene}，{lighting}，{style}，專業形象，高畫質",
+    "storyTemplate": "{person}的人物介紹開場畫面，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，裸露，色情，性感暗示，nsfw, nudity, sexual content",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "1280x704",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "camera": "中景半身",
+      "angle": "斜側 45 度",
+      "movement": "固定機位",
+      "person": "一位四十多歲的亞洲男性主管",
+      "outfit": "深灰色西裝與白色襯衫",
+      "expression": "自信的微笑",
+      "action": "看向鏡頭微微點頭致意",
+      "scene": "明亮的現代辦公室",
+      "lighting": "柔和攝影棚燈光",
+      "style": "商業廣告質感"
+    },
+    "seed": 20261104
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "畫面中的人物由 AI 虛構；提示詞不要寫入真實藝人或公眾人物的姓名。若加入真人照片作為來源，必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}
