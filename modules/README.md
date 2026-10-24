@@ -53,6 +53,23 @@ modules/
 - `example.variables` 會預先填入預設的 `{變數}` 欄位；`tools/generate-examples.mjs` 也會用它和 `example.seed` 產生範例影片。
 - `safety.requiresPersonConsent` 為 `true` 時，使用者若加入照片送出 ComfyUI 工作，會先被要求確認已取得照片人物同意。
 
+## 細節欄位（fields）
+
+`module.json` 的 `fields` 讓預設的 `{變數}` 以下拉選單或文字框呈現：
+
+```json
+"fields": [
+  { "use": "camera", "default": "遠景全身" },
+  { "use": "outfit" },
+  { "name": "danceStyle", "label": "舞風", "type": "select", "options": ["街舞", "爵士舞"], "default": "街舞" },
+  { "name": "scene", "label": "場景", "type": "text", "default": "霓虹燈光的舞台", "help": "寫得越具體越好" }
+]
+```
+
+- `name` 對應提示詞範本裡的 `{name}`；`type` 為 `select`（下拉選單，另附「自訂…」）或 `text`（文字框）。
+- `use` 會先帶入 `modules/_shared/fields.json` 的共用欄位（camera、angle、movement、person、outfit、expression、lighting、style），其餘欄位可覆寫，例如改 `label`、`options`、`default`。
+- 最多 20 個欄位；`options` 最多 30 個、每個 100 字以內。欄位顯示順序依 `fields` 排列。
+
 ## preview.js（Canvas 預覽）
 
 瀏覽器以 ES module 載入，必須匯出 `renderFrame`，每一格畫面都會呼叫一次：

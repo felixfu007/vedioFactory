@@ -63,7 +63,9 @@ async function startMockCivitai() {
   });
   const models = {
     100: model(100),
+    101: model(101, { nsfw: true }),
     102: model(102, { poi: true }),
+    107: model(107, { minor: true }),
     103: model(103, {}, 'old-format.ckpt'),
     104: model(104),
     105: model(105, { allowCommercialUse: ['None'] }),
@@ -558,6 +560,7 @@ async function main() {
       ['not a url', 400, /完整/],
       ['https://civitai.com/images/5', 400, /看不懂/],
       ['https://civitai.com/models/102', 403, /真實人物/],
+      ['https://civitai.com/models/107', 403, /未成年人/],
       ['https://civitai.com/models/103', 400, /safetensors/],
       ['https://civitai.com/models/999', 404, /找不到/],
     ]) {
@@ -565,6 +568,11 @@ async function main() {
       assert.equal(refused.status, status, url);
       assert.match((await refused.json()).error, pattern, url);
     }
+    // 成人內容標記：只提醒、不阻擋。
+    const adultPreview = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/101' });
+    assert.equal(adultPreview.status, 200);
+    assert.match((await adultPreview.json()).contentWarnings[0], /成人內容/);
+    assert.deepEqual(modelPreview.contentWarnings, []);
     const badFolder = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/100', folder: '../system32' });
     assert.equal(badFolder.status, 400);
     const noCommercial = await postInstall('/api/model-installs/preview', { url: 'https://civitai.com/models/105' })
