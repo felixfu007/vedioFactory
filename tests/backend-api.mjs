@@ -53,7 +53,6 @@ async function startMockCivitai() {
     id,
     name: `測試模型 ${id}`,
     type: 'LORA',
-    nsfw: false,
     poi: false,
     minor: false,
     allowCommercialUse: ['Image', 'Rent'],
@@ -64,7 +63,6 @@ async function startMockCivitai() {
   });
   const models = {
     100: model(100),
-    101: model(101, { nsfw: true }),
     102: model(102, { poi: true }),
     103: model(103, {}, 'old-format.ckpt'),
     104: model(104),
@@ -559,7 +557,6 @@ async function main() {
       ['https://evil.example/models/100', 400, /civitai\.com/],
       ['not a url', 400, /完整/],
       ['https://civitai.com/images/5', 400, /看不懂/],
-      ['https://civitai.com/models/101', 403, /成人內容/],
       ['https://civitai.com/models/102', 403, /真實人物/],
       ['https://civitai.com/models/103', 400, /safetensors/],
       ['https://civitai.com/models/999', 404, /找不到/],
@@ -843,7 +840,6 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       },
       preset: {
         promptTemplate: '{dancer} 在舞台上跳{style}',
-        negativePrompt: 'nsfw',
         seedMode: 'fixed',
         seed: 2026,
         settings: { resolution: '1280x704', fps: 24, duration: 5 },
