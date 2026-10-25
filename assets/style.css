@@ -91,8 +91,77 @@ textarea {
 .hero {
   display: grid;
   gap: 1rem;
-  grid-template-columns: 1.8fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   align-items: center;
+  padding: 1rem 1.5rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.hero .eyebrow {
+  margin: 0 0 0.25rem;
+}
+
+.tabs {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(7, 17, 31, 0.92);
+  backdrop-filter: blur(20px);
+}
+
+.tabs button {
+  background: transparent;
+  color: var(--muted);
+  padding: 0.7rem 0.5rem;
+  white-space: nowrap;
+}
+
+.tabs button[aria-selected="true"] {
+  background: linear-gradient(135deg, var(--primary), #7f78ff);
+  color: white;
+}
+
+.tab-badge {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 0.25rem;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  background: #ffb547;
+  color: #1b1200;
+  font-size: 0.8em;
+  font-weight: 700;
+}
+
+.tab-badge[hidden],
+.tab-panel[hidden] {
+  display: none;
+}
+
+.tab-panel {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.global-status {
+  margin: -0.75rem 0 0;
+  padding: 0 1rem;
+}
+
+.sketch-panel {
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px dashed rgba(151, 171, 196, 0.25);
 }
 
 .hero-copy,
@@ -106,11 +175,13 @@ textarea {
 .hero-status {
   display: grid;
   gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-content: start;
 }
 
 /* Long local paths (output folder, delivery folder) must wrap instead of widening the page. */
 .layout > *,
+.tab-panel > *,
 .hero > *,
 .controls-grid > * {
   min-width: 0;
@@ -140,8 +211,9 @@ textarea {
 
 .controls-grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .panel {
@@ -447,5 +519,25 @@ textarea {
 
   .layout {
     width: min(100% - 1rem, 100%);
+    padding-top: 0.5rem;
+  }
+
+  .hero {
+    padding: 0.9rem 1rem;
+  }
+
+  .hero-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .tabs {
+    border-radius: 20px;
+  }
+
+  .tabs button {
+    padding: 0.65rem 0.25rem;
+    font-size: 0.9rem;
   }
 }
