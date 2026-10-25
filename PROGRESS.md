@@ -114,6 +114,14 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 - 我的思考內容也要用中文（使用者看得到）；英文錯誤訊息要翻成中文說明。
 - Docker 版正在 8000 埠執行（`docker compose ps`）；改了程式後要 `docker compose up --build -d` 才會更新。Tailscale：https://desktop-77qk2tg.taild30d3d.ts.net:8443。
 
+## 目前工作：第 9 項結構整理（2026-10-25，分支 `feature/split-server`）
+
+- [x] 後端拆分：`server.js`（2,823 → 約 380 行，只留組裝與路由）＋ `lib/` 的 config、utils、validation、catalog、runtime、comfyui、workflows、inference、presets、library、deliveries。提交 `435d70f`。
+- [x] 安全修正：靜態檔原本以專案根目錄提供（`npm start` 時 `.env` 會外洩），改為只開放 `index.html` 與 `assets/`，並加測試。提交 `ee35d96`。
+- [x] 前端拆分：`assets/app.js`（入口，約 110 行）＋ `assets/app/` 16 個 ES modules（Agent 完成，我驗收：語法檢查、`npm run test:all` 通過）。
+- [x] 修正剪輯失敗時錯誤訊息被 TypeError 蓋掉（`trimBlob`）。
+- 已知小問題（未修）：載入工作清單途中收到更新事件會被略過；切換為瀏覽器資料夾後輪詢未停止；改 ES modules 後無法用 file:// 直接開 index.html（README 本來就要求經由伺服器開啟）。
+
 ## 下一步候選（待規畫）
 
 - 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。

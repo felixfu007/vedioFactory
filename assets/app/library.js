@@ -327,7 +327,7 @@ async function trimBlob(blob, item, startTime, endTime) {
       duration: Number((safeEnd - safeStart).toFixed(1)),
     };
   } catch (error) {
-    if (recorder?.state !== 'inactive') {
+    if (recorder && recorder.state !== 'inactive') {
       recorder.stop();
       await done?.catch(() => undefined);
     }
