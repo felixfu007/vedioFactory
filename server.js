@@ -282,6 +282,11 @@ function createApp(options = {}) {
       sendText(response, 403, 'Forbidden');
       return;
     }
+    // Only the page and assets/ are public; .env, server code and .git must never be served.
+    if (relativePath !== 'index.html' && !relativePath.startsWith(`assets${path.sep}`)) {
+      sendText(response, 404, 'Not found');
+      return;
+    }
 
     try {
       const stats = await fs.stat(targetPath);
