@@ -166,6 +166,12 @@ async function main() {
     assert.match(JSON.parse(reboundHost.body).error, /VEDIO_FACTORY_ALLOWED_HOSTS/);
     assert.equal((await rawRequest(`${origin}/`, { headers: { host: `attacker.example:${port}` } })).status, 403);
     assert.equal((await rawRequest(`${origin}/api/health`, { headers: { host: `localhost:${port}` } })).status, 200);
+    // Static files: only index.html and assets/ are served.
+    assert.equal((await fetch(`${origin}/`)).status, 200);
+    assert.equal((await fetch(`${origin}/assets/style.css`)).status, 200);
+    for (const privatePath of ['/.env', '/package.json', '/server.js', '/lib/config.js', '/.git/config', '/Dockerfile']) {
+      assert.equal((await fetch(`${origin}${privatePath}`)).status, 404, privatePath);
+    }
     const crossOriginWrite = await rawRequest(`${origin}/api/config/output-dir`, {
       method: 'POST',
       headers: { 'content-type': 'text/plain', origin: 'http://attacker.example' },
