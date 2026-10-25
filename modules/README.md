@@ -51,7 +51,8 @@ modules/
 - `workflow` 的欄位和 `workflows/*.vf.json` 相同（見根目錄 README「多工作流與參數規格」）。工作流會以 `module-<id>` 出現在工作流選單。
 - `preset` 會以「［場景模組］」內建預設出現在預設清單，不可修改或刪除，但可以套用後另存為自己的預設。
 - `example.variables` 會預先填入預設的 `{變數}` 欄位；`tools/generate-examples.mjs` 也會用它和 `example.seed` 產生範例影片。
-- `safety.requiresPersonConsent` 為 `true` 時，使用者若加入照片送出 ComfyUI 工作，會先被要求確認已取得照片人物同意。
+- `safety.requiresPersonConsent` 為 `true` 時，使用者若加入照片送出 ComfyUI 工作，網頁會先要求確認已取得照片人物同意；後端也會要求請求帶 `personConsent: true`，並把確認時間記錄在工作記錄（`personConsent.confirmedAt`）與交付 manifest 中。
+- 要用照片當第一格的模組，工作流用 `LoadImage` 載入 `{{source_image}}`，接到 `Wan22ImageToVideoLatent` 的 `start_image`，並在 `workflow` 設定 `"requiresSourceImage": true`；範例見 `modules/photo-person`。
 
 ## 細節欄位（fields）
 
