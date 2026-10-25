@@ -962,6 +962,33 @@ fs.writeFileSync(args.at(-1), 'MP4:' + fs.readFileSync(input, 'utf8'));
       assert.equal(comfyWorkflows.at(-1)['3'].inputs.fps, 24);
       await fs.rm(moduleJob.manifestPath);
 
+      // A module that requires person consent refuses photos without it and records it when given.
+      const consentPayload = {
+        prompt: '照片中的人物揮手',
+        workflowId: 'module-demo-dance',
+        sourceImageDataUrl: 'data:image/png;base64,aGVsbG8=',
+        settings: { resolution: '704x1280', fps: 24, duration: 5 },
+      };
+      const postModuleJob = (body) => fetch(`${comfyAppOrigin}/api/inference/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const missingConsent = await postModuleJob(consentPayload);
+      assert.equal(missingConsent.status, 400);
+      assert.match((await missingConsent.json()).error, /同意/);
+      assert.equal((await postModuleJob({ ...consentPayload, personConsent: 'yes' })).status, 400);
+      const consentedJob = await postModuleJob({ ...consentPayload, personConsent: true }).then((response) => response.json());
+      assert.equal(consentedJob.personConsent.confirmed, true);
+      assert.ok(!Number.isNaN(Date.parse(consentedJob.personConsent.confirmedAt)));
+      const consentedRerun = await fetch(`${comfyAppOrigin}/api/inference/jobs/${consentedJob.id}/rerun`, { method: 'POST' })
+        .then((response) => response.json());
+      assert.deepEqual(consentedRerun.personConsent, consentedJob.personConsent);
+      const textOnlyJob = await postModuleJob({ ...consentPayload, sourceImageDataUrl: '', personConsent: true })
+        .then((response) => response.json());
+      assert.equal(textOnlyJob.personConsent, undefined);
+      await Promise.all([consentedJob, consentedRerun, textOnlyJob].map((job) => fs.rm(job.manifestPath)));
+
       const workflows = await fetch(`${comfyAppOrigin}/api/workflows`).then((response) => response.json());
       assert.equal(workflows[0].id, 'default');
       assert.deepEqual(

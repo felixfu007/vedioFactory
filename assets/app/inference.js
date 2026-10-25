@@ -117,7 +117,8 @@ async function prepareInferenceRequest({ hasBatchPrompts = false } = {}) {
   const seed = readSeedSetting();
   const scenarioModuleId = getSelectedWorkflow()?.scenarioModuleId;
   const scenarioModule = window.VedioFactory.scenarioModules?.find((item) => item.id === scenarioModuleId);
-  if (file && scenarioModule?.safety?.requiresPersonConsent) {
+  const personConsent = Boolean(file && scenarioModule?.safety?.requiresPersonConsent);
+  if (personConsent) {
     const notice = scenarioModule.safety.notes || '使用真人照片產生影片前，必須取得照片中人物的同意。';
     if (!window.confirm(`${notice}\n\n確認已取得照片中人物的同意後再繼續？`)) {
       setInferenceStatus('已取消：尚未確認照片人物同意。');
@@ -155,6 +156,7 @@ async function prepareInferenceRequest({ hasBatchPrompts = false } = {}) {
     moduleId: spec.moduleId,
     videoModelId: ui.videoModelSelect.value,
     sourceImageDataUrl: spec.sourceImageDataUrl,
+    ...(personConsent ? { personConsent: true } : {}),
     settings: {
       duration: spec.duration,
       fps: spec.fps,

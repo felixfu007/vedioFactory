@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "photo-person",
+  "name": "照片人物動態影片",
+  "description": "以一張人物照片作為第一個畫面，讓照片中的人自然動起來（轉頭、微笑、揮手等）。適合客戶提供的形象照、員工照、商品代言照。必須取得照片人物本人同意。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "照片",
+    "圖生影片"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 TI2V 5B 圖生影片：照片會置中裁切成所選解析度後當作第一格，原生 24 FPS；16GB 顯示卡建議 5 秒以內。",
+    "videoModelIds": [
+      "wan-2.2-ti2v-5b"
+    ],
+    "requiresSourceImage": true,
+    "resolutions": [
+      "1280x704",
+      "704x1280",
+      "960x544",
+      "544x960"
+    ],
+    "allowCustomResolution": true,
+    "resolutionMultiple": 32,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "照片人物動態影片（Wan 2.2 圖生影片）",
+    "defaults": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "movement",
+      "default": "鏡頭固定不動"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "緩緩轉頭看向鏡頭並露出微笑",
+        "輕輕點頭致意",
+        "對鏡頭揮手打招呼",
+        "自然地眨眼並微微呼吸",
+        "撥動頭髮後看向鏡頭",
+        "雙手交叉胸前自信地站著"
+      ],
+      "default": "緩緩轉頭看向鏡頭並露出微笑",
+      "help": "照片中人物要做的動作；動作越小，越能保持長相一致。"
+    },
+    {
+      "use": "expression"
+    },
+    {
+      "name": "background",
+      "label": "背景動態",
+      "type": "select",
+      "options": [
+        "背景保持不變",
+        "背景有輕微光影變化",
+        "頭髮與衣服被微風吹動"
+      ],
+      "default": "背景保持不變"
+    },
+    {
+      "use": "style",
+      "default": "真實攝影質感"
+    }
+  ],
+  "preset": {
+    "description": "照片人物動態影片，直式 5 秒；請在「來源圖片」選擇人物照片。",
+    "promptTemplate": "照片中的人物{action}，{expression}，{movement}，{background}，{style}，保持人物長相、髮型與服裝和照片一致，動作自然流暢，高畫質",
+    "storyTemplate": "照片中的人物{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，換臉，臉部變形，長相改變，五官扭曲，閃爍",
+    "videoModelId": "wan-2.2-ti2v-5b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "704x1280",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 40,
+      "captionStrength": 0
+    }
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "只能使用已取得本人同意的人物照片（客戶提供時，請確認客戶已取得照片人物的授權）。不得用於冒充、誤導、政治宣傳或任何不雅內容；未成年人照片需取得監護人同意。送出時的同意確認會記錄在工作記錄與交付資料夾中。"
+  }
+}

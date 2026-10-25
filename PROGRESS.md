@@ -122,6 +122,15 @@ GPU 最高約 84°C、功耗約 265 W、顯存約 11–13 GB。影片在使用�
 - [x] 修正剪輯失敗時錯誤訊息被 TypeError 蓋掉（`trimBlob`）。
 - 已知小問題（未修）：載入工作清單途中收到更新事件會被略過；切換為瀏覽器資料夾後輪詢未停止；改 ES modules 後無法用 file:// 直接開 index.html（README 本來就要求經由伺服器開啟）。
 
+PR #15 已合併（2026-10-25）。
+
+## 目前工作：照片驅動人物影片（2026-10-25 使用者選定，分支 `feature/photo-driven-video`）
+
+- [x] P1 後端同意紀錄：模組 `safety.requiresPersonConsent` 且附照片時，請求必須帶 `personConsent: true`，否則 400；工作記錄存 `personConsent.confirmedAt`，重跑沿用、交付 manifest 隨工作記錄帶出。前端確認後送出。
+- [x] P2 模組 `photo-person`（照片人物動態）：LoadImage → ImageScale（lanczos、置中裁切）→ Wan22ImageToVideoLatent start_image。
+- [x] P3 API 測試（缺同意 400、非布林 400、記錄、重跑沿用、純文字不記錄）通過；GPU 實測（來源＝藝人範例影片第 2.5 秒畫面，AI 虛構人物）：704×1280、121 幀、317 秒、最高 82°C，揮手動作正確，長相／髮型／服裝／飾品一致；小瑕疵：手部動態模糊、左下角出現白色小物件。影片 `comfyui-2ef68465-1.webm`（客戶「測試」、專案「照片人物」）在影片庫，可自行刪除。
+- [x] P4 文件（README、modules/README.md）、PR。
+
 ## 下一步候選（待規畫）
 
 - 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。
