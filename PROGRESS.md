@@ -147,6 +147,16 @@ PR #15 已合併（2026-10-25）。
 - 實測後製：RIFE 補幀 16→32 FPS 只需 15 秒；補幀＋Real-ESRGAN 放大到 1664×960 需 264 秒，細節明顯變清晰。結果已放進影片庫。
 - 尚未整合進網站：後製（補幀／放大）、Stable Audio 配樂、Wan-Dancer（需起始圖＋音樂，一次 149 幀，顯存風險高）。
 
+## LoRA 模組與 LTX 2.3（2026-10-26）
+
+- 已安裝 Civitai LoRA：LTX 拉丁舞、LTX Phut Hon 舞（兩者授權禁止商用輸出，僅內部測試）、LTX 東亞臉部保真、Wan I2V Squat Bounce 舞（high noise）。
+- 已下載：Wan 2.2 I2V 14B 高／低＋ I2V 4 步 LoRA；LTX 2.3 22B NVFP4（21.7 GB）、Gemma 3 12B FP4 文字編碼器（9.5 GB）、蒸餾 LoRA（2.7 GB）、空間放大 x2（1.0 GB）。全部 SHA-256 驗證通過。
+- 新模組：ltx-latin-dance、ltx-phut-hon-dance、ltx-photo-person、wan-squat-dance。實測（RTX 5070 Ti）：LTX 576×1024／5 秒附音訊 66～82 秒、最高 80°C；Wan I2V 480×832／5 秒 115 秒、82°C。畫面全部正確。
+- 大尺碼內衣廣告樣片（costume-14b，720×1280，約 5 分鐘）：comfyui-de27dbce-1.webm，客戶「大尺碼內衣客戶」。
+- 客戶指定的 pipi-Krea2-huge breasts：規則上可裝，但為 Krea 2 圖片 LoRA、與影片模型不相容，未安裝。
+- Civitai LoRA 數量（API 可見，含 NSFW）：Wan 2.2 T2V 781、I2V 568、5B 81、Wan 2.1 14B t2v 809、Hunyuan Video 808、LTX 2.3 387；圖片模型 SDXL／Pony／Illustrious／Flux／Krea 2 都超過 1 萬。
+- 日本女性候選 LoRA（可商用輸出）：Virtual Japanese Woman LISA（Wan 2.2 T2V 高／低）、MIREI（高／低）；台灣女性專用無。待使用者決定。
+
 ## 下一步候選（待規畫）
 
 - 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。
