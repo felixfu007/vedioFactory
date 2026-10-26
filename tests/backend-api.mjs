@@ -66,6 +66,7 @@ async function startMockCivitai() {
     101: model(101, { nsfw: true }),
     102: model(102, { poi: true }),
     107: model(107, { minor: true }),
+    108: model(108, { tags: ['cosplay', 'Loli'] }),
     103: model(103, {}, 'old-format.ckpt'),
     104: model(104),
     105: model(105, { allowCommercialUse: ['None'] }),
@@ -214,8 +215,8 @@ async function main() {
     assert.equal(catalog.currentProjectStatus.inferenceScaffold.hasIntegratedModelWeights, false);
     assert.deepEqual(catalog.firstBatchOrder, ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     assert.equal(catalog.models.some((model) => model.id === 'sdxl'), true);
-    assert.equal(catalog.videoModels.length, 10);
-    assert.deepEqual(catalog.videoModels.map((model) => model.priority), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.equal(catalog.videoModels.length, 12);
+    assert.deepEqual(catalog.videoModels.map((model) => model.priority), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     assert.deepEqual(catalog.videoModels.slice(0, 3).map((model) => model.id), [
       'wan-2.2-ti2v-5b',
       'framepack-f1',
@@ -567,6 +568,7 @@ async function main() {
       ['https://civitai.com/images/5', 400, /看不懂/],
       ['https://civitai.com/models/102', 403, /真實人物/],
       ['https://civitai.com/models/107', 403, /未成年人/],
+      ['https://civitai.com/models/108', 403, /未成年人/],
       ['https://civitai.com/models/103', 400, /safetensors/],
       ['https://civitai.com/models/999', 404, /找不到/],
     ]) {

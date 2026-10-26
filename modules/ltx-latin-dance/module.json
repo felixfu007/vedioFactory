@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "id": "ltx-latin-dance",
+  "name": "拉丁舞影片（LTX 2.3）",
+  "description": "LTX 2.3 搭配拉丁舞動作 LoRA：扭胯、重心轉移、轉身與交叉步，並同時產生音訊。此動作 LoRA 的授權不允許把生成結果用於商業用途，只能內部測試，不可交付客戶。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "舞蹈",
+    "拉丁舞",
+    "LTX",
+    "附音訊",
+    "僅限內部測試"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "LTX 2.3 22B（NVFP4）兩段式生成並同時產生音訊，輸出附音訊 MP4；24 FPS、最長 5 秒。",
+    "videoModelIds": [
+      "ltx-2"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1024x576",
+      "576x1024",
+      "1280x704",
+      "704x1280"
+    ],
+    "allowCustomResolution": false,
+    "resolutionMultiple": 64,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "拉丁舞影片（LTX 2.3 文生影片＋音訊）",
+    "defaults": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "name": "scene",
+      "label": "場景",
+      "type": "select",
+      "options": [
+        "燈光華麗的舞廳",
+        "夜晚的街頭廣場",
+        "海邊夕陽",
+        "純黑背景攝影棚"
+      ],
+      "default": "燈光華麗的舞廳"
+    },
+    {
+      "use": "person",
+      "default": "a young adult Latina woman in her twenties with long dark hair"
+    },
+    {
+      "use": "outfit",
+      "default": "紅色亮片拉丁舞裙"
+    },
+    {
+      "name": "moves",
+      "label": "舞步",
+      "type": "select",
+      "options": [
+        "hip sway, weight transfer, torso rotation, cross step",
+        "spins and turns with arm styling",
+        "fast footwork with hip sway"
+      ],
+      "default": "hip sway, weight transfer, torso rotation, cross step"
+    },
+    {
+      "use": "camera",
+      "default": "遠景全身"
+    },
+    {
+      "use": "movement",
+      "default": "固定機位"
+    }
+  ],
+  "preset": {
+    "description": "拉丁舞影片，直式 5 秒，附音訊。",
+    "promptTemplate": "{scene}, {person}, wearing {outfit}, dancing latin dance, {moves}, energetic latin music, {camera}, {movement}",
+    "storyTemplate": "{person}在{scene}跳拉丁舞。",
+    "negativePrompt": "pc game, console game, video game, cartoon, childish, ugly, 兒童，未成年外觀，字幕，浮水印，模糊，畸形的手，臉部變形",
+    "videoModelId": "ltx-2",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 0
+    }
+  },
+  "example": {
+    "variables": {
+      "scene": "燈光華麗的舞廳",
+      "person": "a young adult Latina woman in her twenties with long dark hair",
+      "outfit": "紅色亮片拉丁舞裙",
+      "moves": "hip sway, weight transfer, torso rotation, cross step",
+      "camera": "遠景全身",
+      "movement": "固定機位"
+    },
+    "seed": 20261027
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "此動作 LoRA 的授權不允許把生成結果用於商業用途，只能內部測試，不可交付客戶。人物由 AI 虛構且必須是成年人；不要寫入真實人物姓名。"
+  }
+}

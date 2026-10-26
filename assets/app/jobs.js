@@ -5,6 +5,7 @@ import { fetchJson } from './dom.js';
 import { listFolderItems } from './library-store.js';
 import { renderLibrary } from './library.js';
 import { rerunInferenceJob } from './inference.js';
+import { setQueueBadge } from './tabs.js';
 
 const jobStatusLabels = {
   scaffolded: '未提交',
@@ -20,6 +21,7 @@ function isActiveJob(job) {
 }
 
 export function renderJobs() {
+  setQueueBadge(state.jobs.items.filter(isActiveJob).length);
   const filter = ui.jobStatusFilter.value;
   const visibleJobs = state.jobs.items.filter((job) => (
     !filter || (filter === 'active' ? isActiveJob(job) : job.status === filter)

@@ -88,7 +88,7 @@ export function renderLibrary() {
       video.src = item.previewUrl ?? '';
     }
     title.textContent = item.fileName;
-    subtitle.textContent = `${item.moduleName} ・ ${new Date(item.createdAt).toLocaleString('zh-TW')}`;
+    subtitle.textContent = `${item.inferenceJobId ? 'AI 影片' : '示意動畫（非 AI）'} ・ ${item.moduleName} ・ ${new Date(item.createdAt).toLocaleString('zh-TW')}`;
     summary.textContent = item.story || item.prompt || '由照片與風格模組共同生成。';
     endInput.value = String(item.duration);
     endInput.max = String(item.duration);

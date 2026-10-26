@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "id": "ltx-phut-hon-dance",
+  "name": "Phut Hon 舞影片（LTX 2.3）",
+  "description": "LTX 2.3 搭配 Phut Hon 流行舞動作 LoRA：雙手抱頭擺動身體的招牌動作，並同時產生音訊。此動作 LoRA 的授權不允許把生成結果用於商業用途，只能內部測試，不可交付客戶。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "舞蹈",
+    "流行舞",
+    "LTX",
+    "附音訊",
+    "僅限內部測試"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "LTX 2.3 22B（NVFP4）兩段式生成並同時產生音訊，輸出附音訊 MP4；24 FPS、最長 5 秒。",
+    "videoModelIds": [
+      "ltx-2"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "1024x576",
+      "576x1024",
+      "1280x704",
+      "704x1280"
+    ],
+    "allowCustomResolution": false,
+    "resolutionMultiple": 64,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "Phut Hon 舞影片（LTX 2.3 文生影片＋音訊）",
+    "defaults": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "name": "scene",
+      "label": "場景",
+      "type": "select",
+      "options": [
+        "sunny beach with blue sky and ocean waves",
+        "城市頂樓夜景",
+        "明亮的舞蹈教室",
+        "霓虹燈光的街頭"
+      ],
+      "default": "sunny beach with blue sky and ocean waves"
+    },
+    {
+      "use": "person",
+      "default": "a young adult woman in her twenties with short black hair"
+    },
+    {
+      "use": "outfit",
+      "default": "白色 T 恤與牛仔短褲"
+    },
+    {
+      "use": "camera",
+      "default": "中景半身"
+    },
+    {
+      "use": "movement",
+      "default": "固定機位"
+    }
+  ],
+  "preset": {
+    "description": "Phut Hon 舞影片，直式 5 秒，附音訊。",
+    "promptTemplate": "phut hon dance, {scene}, {person} wearing {outfit}, lift hands behind head and swing hips, {camera}, {movement}",
+    "storyTemplate": "{person}跳 Phut Hon 舞。",
+    "negativePrompt": "pc game, console game, video game, cartoon, childish, ugly, 兒童，未成年外觀，字幕，浮水印，模糊，畸形的手，臉部變形",
+    "videoModelId": "ltx-2",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 0
+    }
+  },
+  "example": {
+    "variables": {
+      "scene": "sunny beach with blue sky and ocean waves",
+      "person": "a young adult woman in her twenties with short black hair",
+      "outfit": "白色 T 恤與牛仔短褲",
+      "camera": "中景半身",
+      "movement": "固定機位"
+    },
+    "seed": 20261028
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "此動作 LoRA 的授權不允許把生成結果用於商業用途，只能內部測試，不可交付客戶。人物由 AI 虛構且必須是成年人；不要寫入真實人物姓名。"
+  }
+}

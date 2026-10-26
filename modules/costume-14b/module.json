@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "costume-14b",
+  "name": "服裝造型影片（14B 高品質）",
+  "description": "以 Wan 2.2 14B 大模型呈現人物服裝造型，服裝細節比 5B 更聽從提示詞。人物由 AI 虛構。每部約需數分鐘以上，請先用較低解析度測試。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "服裝",
+    "造型",
+    "14B"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 T2V 14B（fp8）高低雜訊雙模型＋ lightx2v 4 步加速，原生 16 FPS、最長 5 秒。",
+    "videoModelIds": [
+      "wan-2.2-t2v-a14b"
+    ],
+    "requiresSourceImage": false,
+    "resolutions": [
+      "480x832",
+      "832x480",
+      "720x1280",
+      "1280x720"
+    ],
+    "allowCustomResolution": false,
+    "resolutionMultiple": 16,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      16
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "服裝造型影片（Wan 2.2 14B 文生影片）",
+    "defaults": {
+      "resolution": "480x832",
+      "fps": 16,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "use": "camera",
+      "default": "遠景全身"
+    },
+    {
+      "use": "angle"
+    },
+    {
+      "use": "movement",
+      "default": "固定機位"
+    },
+    {
+      "use": "person",
+      "default": "一位二十多歲的成年亞洲女性，黑色短髮"
+    },
+    {
+      "name": "outfit",
+      "label": "服裝",
+      "type": "select",
+      "options": [
+        "古典女僕裝：黑色長洋裝、白色荷葉邊圍裙與白色頭飾",
+        "現代女僕咖啡廳制服：黑色短袖洋裝與白色圍裙",
+        "中式旗袍",
+        "和服",
+        "西式婚紗",
+        "歐式宮廷禮服",
+        "空服員制服",
+        "西裝套裝"
+      ],
+      "default": "古典女僕裝：黑色長洋裝、白色荷葉邊圍裙與白色頭飾",
+      "help": "選單沒有的服裝請選「自訂…」，顏色、款式、材質寫得越具體越準確。"
+    },
+    {
+      "use": "expression",
+      "default": "溫柔平靜"
+    },
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "輕輕提起裙擺優雅地行禮",
+        "原地緩慢轉一圈展示服裝",
+        "端著放有茶杯的托盤緩步走向鏡頭",
+        "站定後對鏡頭微笑揮手"
+      ],
+      "default": "輕輕提起裙擺優雅地行禮"
+    },
+    {
+      "name": "scene",
+      "label": "背景",
+      "type": "select",
+      "options": [
+        "歐式古典宅邸的大廳",
+        "溫暖的咖啡廳",
+        "純白攝影棚",
+        "花園庭院"
+      ],
+      "default": "歐式古典宅邸的大廳"
+    },
+    {
+      "use": "lighting",
+      "default": "柔和攝影棚燈光"
+    },
+    {
+      "use": "style",
+      "default": "電影感"
+    }
+  ],
+  "preset": {
+    "description": "服裝造型影片，14B 直式 5 秒。",
+    "promptTemplate": "{camera}、{angle}、{movement}，{person}，穿著{outfit}，服裝細節清晰，{expression}，{action}，背景是{scene}，{lighting}，{style}，真實攝影質感，高畫質",
+    "storyTemplate": "{person}穿著{outfit}，{action}。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，兒童，未成年外觀",
+    "videoModelId": "wan-2.2-t2v-a14b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "480x832",
+      "fps": 16,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 50,
+      "captionStrength": 40
+    }
+  },
+  "example": {
+    "variables": {
+      "camera": "遠景全身",
+      "angle": "正面",
+      "movement": "固定機位",
+      "person": "一位二十多歲的成年亞洲女性，黑色短髮",
+      "outfit": "古典女僕裝：黑色長洋裝、白色荷葉邊圍裙與白色頭飾",
+      "expression": "溫柔平靜",
+      "action": "輕輕提起裙擺優雅地行禮",
+      "scene": "歐式古典宅邸的大廳",
+      "lighting": "柔和攝影棚燈光",
+      "style": "電影感"
+    },
+    "seed": 20261026
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "畫面中的人物由 AI 虛構且必須是成年人；提示詞不要寫入真實人物姓名，也不要描述未成年外觀。若加入真人照片，必須取得本人同意。"
+  }
+}

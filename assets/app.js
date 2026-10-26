@@ -30,6 +30,7 @@ import {
 } from './app/presets.js';
 import { setupModelBatch } from './app/models.js';
 import { syncStorageUi, pickFolder, connectOutputDir, initBackend } from './app/backend.js';
+import { initTabs } from './app/tabs.js';
 import { civitaiState, previewCivitaiModel, installCivitaiModel, loadModelInstalls } from './app/civitai.js';
 
 setRegenerateHandler(regenerateItem);
@@ -88,6 +89,7 @@ function attachEvents() {
 }
 
 async function initApp() {
+  initTabs();
   bindUi();
   renderCapabilities(Capabilities.BASE_CAPABILITIES);
   loadStoredLibrary();

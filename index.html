@@ -8,13 +8,10 @@
   </head>
   <body>
     <main class="layout">
-      <section class="hero card">
+      <header class="hero card">
         <div>
           <p class="eyebrow">Local-first AI video studio</p>
-          <h1>vedioFactory 本機 AI 影片生成服務</h1>
-          <p class="hero-copy">
-            匯入照片搭配提示詞，或直接輸入影片描述，就能用可替換的模組快速生成影片，並把成果保存在你指定的本機資料夾。
-          </p>
+          <h1>vedioFactory 本機 AI 影片工作台</h1>
         </div>
         <div class="hero-status">
           <div>
@@ -34,8 +31,18 @@
             <strong id="gpuStatus">檢查中</strong>
           </div>
         </div>
-      </section>
+      </header>
 
+      <nav class="tabs" role="tablist" aria-label="功能分頁">
+        <button id="tab-create" type="button" role="tab" data-tab="create" aria-controls="panel-create">製作影片</button>
+        <button id="tab-queue" type="button" role="tab" data-tab="queue" aria-controls="panel-queue">工作佇列 <span id="queueBadge" class="tab-badge" hidden></span></button>
+        <button id="tab-library" type="button" role="tab" data-tab="library" aria-controls="panel-library">影片庫</button>
+        <button id="tab-models" type="button" role="tab" data-tab="models" aria-controls="panel-models">模型安裝</button>
+      </nav>
+
+      <p id="generationStatus" class="status-text global-status" role="status">尚未開始生成。</p>
+
+      <div id="panel-create" class="tab-panel" role="tabpanel" data-tab-panel="create" aria-labelledby="tab-create">
       <section class="card presets-card">
         <div class="section-header">
           <div>
@@ -79,7 +86,7 @@
 
       <section class="card controls-grid">
         <div class="panel">
-          <h2>1. 選擇輸入素材</h2>
+          <h2>1. 素材與提示詞</h2>
           <label>
             照片（選填）
             <input id="imageInput" type="file" accept="image/*" />
@@ -94,82 +101,53 @@
           </label>
         </div>
 
-        <div class="panel">
-          <h2>2. 切換生成模組</h2>
-          <label>
-            後端輸出資料夾（絕對路徑）
-            <input
-              id="outputDirInput"
-              type="text"
-              placeholder="C:\\Users\\YourName\\Videos\\vedioFactory"
-              spellcheck="false"
-            />
-          </label>
-          <div class="inline-actions">
-            <button id="connectOutputDirButton" type="button" class="secondary">套用後端資料夾</button>
-            <button id="pickFolderButton" type="button" class="secondary">改用瀏覽器資料夾模式</button>
+        <form id="generationForm" class="panel">
+          <h2>2. 影片參數</h2>
+          <div class="parameter-grid">
+            <label>
+              長度（秒）
+              <input id="durationInput" type="number" min="2" max="30" step="1" value="6" />
+            </label>
+            <label>
+              FPS
+              <select id="fpsInput"></select>
+            </label>
+            <label>
+              解析度
+              <select id="resolutionInput"></select>
+            </label>
+            <label>
+              品質
+              <select id="qualityInput">
+                <option value="draft">草稿</option>
+                <option value="balanced" selected>平衡</option>
+                <option value="premium">高品質</option>
+              </select>
+            </label>
+            <label>
+              運鏡強度
+              <input id="motionInput" type="range" min="0" max="100" value="55" />
+            </label>
+            <label>
+              文字強調
+              <input id="captionInput" type="range" min="0" max="100" value="65" />
+            </label>
           </div>
-          <label>
-            生成模組
-            <select id="moduleSelect"></select>
-          </label>
-          <div id="moduleDetails" class="module-details"></div>
-          <p class="hint">
-            預設會透過本機後端直接管理指定資料夾；若需要，也可切換成瀏覽器資料夾授權模式。
-          </p>
-        </div>
+          <div id="customResolutionFields" class="parameter-grid" hidden>
+            <label>
+              自訂寬度
+              <input id="customWidthInput" type="number" step="8" min="256" max="3840" value="1280" />
+            </label>
+            <label>
+              自訂高度
+              <input id="customHeightInput" type="number" step="8" min="256" max="3840" value="720" />
+            </label>
+          </div>
+          <p id="capabilityHint" class="hint"></p>
+        </form>
 
         <div class="panel">
-          <h2>3. 設定影片參數</h2>
-          <form id="generationForm" class="panel">
-            <div class="parameter-grid">
-              <label>
-                長度（秒）
-                <input id="durationInput" type="number" min="2" max="30" step="1" value="6" />
-              </label>
-              <label>
-                FPS
-                <select id="fpsInput"></select>
-              </label>
-              <label>
-                解析度
-                <select id="resolutionInput"></select>
-              </label>
-              <label>
-                品質
-                <select id="qualityInput">
-                  <option value="draft">草稿</option>
-                  <option value="balanced" selected>平衡</option>
-                  <option value="premium">高品質</option>
-                </select>
-              </label>
-              <label>
-                運鏡強度
-                <input id="motionInput" type="range" min="0" max="100" value="55" />
-              </label>
-              <label>
-                文字強調
-                <input id="captionInput" type="range" min="0" max="100" value="65" />
-              </label>
-            </div>
-            <div id="customResolutionFields" class="parameter-grid" hidden>
-              <label>
-                自訂寬度
-                <input id="customWidthInput" type="number" step="8" min="256" max="3840" value="1280" />
-              </label>
-              <label>
-                自訂高度
-                <input id="customHeightInput" type="number" step="8" min="256" max="3840" value="720" />
-              </label>
-            </div>
-            <p id="capabilityHint" class="hint"></p>
-            <button id="generateButton" type="submit" class="primary">生成影片</button>
-            <p id="generationStatus" class="status-text">尚未開始生成。</p>
-          </form>
-        </div>
-
-        <div class="panel">
-          <h2>4. 本機 ComfyUI 推論</h2>
+          <h2>3. 用 AI 生成（本機 ComfyUI）</h2>
           <div id="inferenceRuntime" class="module-details"></div>
           <label>
             ComfyUI 工作流
@@ -199,7 +177,8 @@
           </div>
           <button id="workflowCheckButton" type="button" class="secondary">檢查 ComfyUI 工作流</button>
           <p id="workflowCheckStatus" class="status-text">尚未檢查工作流。</p>
-          <button id="queueInferenceButton" type="button" class="secondary">建立本機推論工作</button>
+          <button id="queueInferenceButton" type="button" class="primary">用 AI 生成影片</button>
+          <p class="hint">送出後由本機 ComfyUI 生成，每部約 5～6 分鐘；可到「工作佇列」分頁看進度，完成後自動存到「影片庫」。</p>
           <button id="cancelInferenceButton" type="button" class="secondary" hidden>取消待執行工作</button>
           <details class="batch-panel">
             <summary>批次生成</summary>
@@ -216,8 +195,23 @@
           </details>
           <p id="inferenceStatus" class="status-text">尚未建立任何推論工作。</p>
         </div>
-      </section>
 
+        <div class="panel sketch-panel">
+          <h2>（選用）示意動畫：不用 AI</h2>
+          <p class="hint">
+            用簡單的人形骨架與文字在瀏覽器裡畫出動畫，幾秒就完成，只適合預覽構圖與節奏。<strong>畫面不會照提示詞變化</strong>；要照提示詞產生真實影片，請用上方「用 AI 生成影片」。
+          </p>
+          <label>
+            示意動畫樣式
+            <select id="moduleSelect"></select>
+          </label>
+          <div id="moduleDetails" class="module-details"></div>
+          <button id="generateButton" type="submit" form="generationForm" class="secondary">產生示意動畫（不用 AI）</button>
+        </div>
+      </section>
+      </div>
+
+      <div id="panel-queue" class="tab-panel" role="tabpanel" data-tab-panel="queue" aria-labelledby="tab-queue">
       <section class="card">
         <div class="section-header">
           <div>
@@ -259,24 +253,69 @@
         </div>
         <p id="jobsStatus" class="status-text"></p>
       </section>
+      </div>
+
+      <div id="panel-library" class="tab-panel" role="tabpanel" data-tab-panel="library" aria-labelledby="tab-library">
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Library</p>
+            <h2>本機影片管理</h2>
+          </div>
+          <button id="refreshButton" type="button" class="secondary">重新整理清單</button>
+        </div>
+        <div class="preset-grid library-filters">
+          <label>
+            依客戶篩選
+            <select id="libraryClientFilter">
+              <option value="">全部客戶</option>
+            </select>
+          </label>
+          <label>
+            依專案篩選
+            <select id="libraryProjectFilter">
+              <option value="">全部專案</option>
+            </select>
+          </label>
+          <label>
+            交付
+            <button id="createDeliveryButton" type="button" class="secondary">為目前篩選建立交付資料夾</button>
+          </label>
+        </div>
+        <p id="deliveryStatus" class="status-text" hidden></p>
+        <div id="libraryEmpty" class="empty-state">
+          尚未找到影片。先生成一段影片，或重新選擇已有產出的本機資料夾。
+        </div>
+        <div id="libraryGrid" class="library-grid"></div>
+      </section>
 
       <section class="card">
         <div class="section-header">
           <div>
-            <p class="eyebrow">Model Roadmap</p>
-            <h2>模型整合規劃表</h2>
+            <p class="eyebrow">Storage</p>
+            <h2>影片存放位置</h2>
           </div>
-          <button id="setupModelBatchButton" type="button" class="secondary">建立首批模型整合清單</button>
         </div>
-        <div id="modelCatalogSummary" class="empty-state">尚未載入模型規劃資料。</div>
-        <h3>本機影片生成模型（10 選）</h3>
-        <p class="hint">這些是模型與工作流建議，尚未代表模型權重已安裝或驗證。請選擇相符的 ComfyUI API 工作流。</p>
-        <div id="videoModelCatalogGrid" class="library-grid"></div>
-        <h3>其他工作流元件</h3>
-        <div id="modelCatalogGrid" class="library-grid"></div>
-        <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
+        <label>
+          後端輸出資料夾（絕對路徑）
+          <input
+            id="outputDirInput"
+            type="text"
+            placeholder="C:\\Users\\YourName\\Videos\\vedioFactory"
+            spellcheck="false"
+          />
+        </label>
+        <div class="inline-actions">
+          <button id="connectOutputDirButton" type="button" class="secondary">套用後端資料夾</button>
+          <button id="pickFolderButton" type="button" class="secondary">改用瀏覽器資料夾模式</button>
+        </div>
+        <p class="hint">
+          預設會透過本機後端直接管理指定資料夾；若需要，也可切換成瀏覽器資料夾授權模式。
+        </p>
       </section>
+      </div>
 
+      <div id="panel-models" class="tab-panel" role="tabpanel" data-tab-panel="models" aria-labelledby="tab-models">
       <section class="card civitai-card">
         <div class="section-header">
           <div>
@@ -320,35 +359,20 @@
       <section class="card">
         <div class="section-header">
           <div>
-            <p class="eyebrow">Library</p>
-            <h2>本機影片管理</h2>
+            <p class="eyebrow">Model Roadmap</p>
+            <h2>模型整合規劃表</h2>
           </div>
-          <button id="refreshButton" type="button" class="secondary">重新整理清單</button>
+          <button id="setupModelBatchButton" type="button" class="secondary">建立首批模型整合清單</button>
         </div>
-        <div class="preset-grid library-filters">
-          <label>
-            依客戶篩選
-            <select id="libraryClientFilter">
-              <option value="">全部客戶</option>
-            </select>
-          </label>
-          <label>
-            依專案篩選
-            <select id="libraryProjectFilter">
-              <option value="">全部專案</option>
-            </select>
-          </label>
-          <label>
-            交付
-            <button id="createDeliveryButton" type="button" class="secondary">為目前篩選建立交付資料夾</button>
-          </label>
-        </div>
-        <p id="deliveryStatus" class="status-text" hidden></p>
-        <div id="libraryEmpty" class="empty-state">
-          尚未找到影片。先生成一段影片，或重新選擇已有產出的本機資料夾。
-        </div>
-        <div id="libraryGrid" class="library-grid"></div>
+        <div id="modelCatalogSummary" class="empty-state">尚未載入模型規劃資料。</div>
+        <h3>本機影片生成模型（12 選）</h3>
+        <p class="hint">這些是模型與工作流建議，尚未代表模型權重已安裝或驗證。請選擇相符的 ComfyUI API 工作流。</p>
+        <div id="videoModelCatalogGrid" class="library-grid"></div>
+        <h3>其他工作流元件</h3>
+        <div id="modelCatalogGrid" class="library-grid"></div>
+        <p id="modelCatalogStatus" class="status-text">尚未建立首批模型整合清單。</p>
       </section>
+      </div>
     </main>
 
     <template id="videoCardTemplate">

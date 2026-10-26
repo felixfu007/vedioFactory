@@ -93,6 +93,12 @@ async function resetDirectory(targetDir) {
   await fs.mkdir(targetDir, { recursive: true });
 }
 
+// 切換功能分頁；隱藏分頁內的按鈕無法點擊或輸入。
+async function showTab(page, name) {
+  await page.click(`#tab-${name}`);
+  await page.waitForFunction((tab) => !document.querySelector(`#panel-${tab}`).hidden, {}, name);
+}
+
 async function runScenario(browser, origin, scenario, managedOutputDir) {
   await resetDirectory(managedOutputDir);
   const page = await browser.newPage();
@@ -104,7 +110,7 @@ async function runScenario(browser, origin, scenario, managedOutputDir) {
 
     await page.waitForFunction(() => document.querySelector('#storageMode')?.textContent.includes('後端'));
     const videoModelCount = await page.$$eval('#videoModelSelect option', (options) => options.length);
-    assert.equal(videoModelCount, 10, 'expected the UI to expose all ten recommended video models');
+    assert.equal(videoModelCount, 12, 'expected the UI to expose all twelve recommended video models');
     assert.equal(await page.$eval('#cancelInferenceButton', (button) => button.hidden), true);
     await page.type('#promptInput', scenario.prompt);
     await page.type('#storyInput', scenario.story);
@@ -246,7 +252,9 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
   const page = await browser.newPage();
   try {
     await page.goto(origin, { waitUntil: 'networkidle0' });
-    await page.waitForFunction(() => document.querySelectorAll('#presetSelect option').length === 10);
+    await showTab(page, 'create');
+    // 等使用者預設載入（選項數量會隨內建模組增加而變動，所以只看這個預設是否出現）。
+    await page.waitForFunction((id) => [...document.querySelectorAll('#presetSelect option')].some((option) => option.value === id), {}, preset.id);
     await page.select('#presetSelect', preset.id);
     await page.waitForSelector('#presetVariables input[data-variable="product"]');
     await page.type('#presetVariables input[data-variable="product"]', '新款耳機');
@@ -295,6 +303,8 @@ async function runPresetScenario(browser, origin, managedOutputDir) {
     const filterOptions = await page.$$eval('#libraryProjectFilter option', (options) => options.map((option) => option.value));
     assert.deepEqual(filterOptions, ['', '春季活動']);
 
+    assert.match(await page.$eval('.video-card .video-subtitle', (subtitle) => subtitle.textContent), /^示意動畫（非 AI）/u);
+    await showTab(page, 'library');
     page.once('dialog', (dialog) => dialog.accept());
     await page.click('#createDeliveryButton');
     await page.waitForFunction(() => document.querySelector('#deliveryStatus').textContent.includes('已建立交付資料夾（1 部影片）'));
@@ -333,7 +343,11 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
   }));
   const page = await browser.newPage();
   try {
-    await page.goto(origin, { waitUntil: 'networkidle0' });
+    await page.goto(`${origin}/#queue`, { waitUntil: 'networkidle0' });
+    // 網址 #queue 直接開啟工作佇列分頁，其他分頁隱藏。
+    assert.equal(await page.$eval('#panel-queue', (panel) => panel.hidden), false);
+    assert.equal(await page.$eval('#panel-create', (panel) => panel.hidden), true);
+    assert.equal(await page.$eval('#tab-queue', (tab) => tab.getAttribute('aria-selected')), 'true');
     await page.waitForFunction(() => document.querySelectorAll('#jobsTableBody tr').length === 1);
     const jobRow = await page.$eval('#jobsTableBody tr', (row) => row.textContent);
     for (const expected of ['失敗', '客戶Q / 佇列', '佇列面板測試', '77', 'z-wan', 'abcdef12 #1', '以相同設定重跑']) {
@@ -342,17 +356,20 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
     await page.select('#jobStatusFilter', 'active');
     assert.equal(await page.$eval('#jobsTable', (table) => table.hidden), true);
     assert.equal(await page.$eval('#jobsEmpty', (empty) => empty.textContent), '沒有符合篩選條件的工作。');
-    await page.waitForFunction(() => document.querySelectorAll('#workflowSelect option').length === 10);
+    await page.waitForFunction(() => ['a-open', 'z-wan', 'module-photo-person']
+      .every((id) => [...document.querySelectorAll('#workflowSelect option')].some((option) => option.value === id)));
     const optionValues = (selector) => page.$$eval(`${selector} option`, (options) => options.map((option) => option.value));
     assert.equal(await page.$eval('#workflowSelect', (select) => select.value), 'a-open');
     assert.ok((await optionValues('#resolutionInput')).includes('custom'));
 
     // Civitai section: a non-Civitai link is refused before anything is downloaded.
+    await showTab(page, 'models');
     await page.type('#civitaiUrlInput', 'https://evil.example/models/1');
     await page.click('#civitaiPreviewButton');
     await page.waitForFunction(() => document.querySelector('#civitaiStatus').textContent.includes('查詢失敗'));
     assert.equal(await page.$eval('#civitaiInstallButton', (button) => button.disabled), true);
 
+    await showTab(page, 'create');
     await page.select('#workflowSelect', 'z-wan');
     assert.deepEqual(await optionValues('#resolutionInput'), ['832x480']);
     assert.deepEqual(await optionValues('#fpsInput'), ['16']);
@@ -379,6 +396,14 @@ async function runWorkflowScenario(browser, origin, managedOutputDir) {
     await page.click('#generateButton');
     assert.equal(await page.$eval('#customWidthInput', (input) => input.validity.valid), false);
     assert.equal(await page.$$eval('.video-card', (cards) => cards.length), 1);
+
+    // 手機寬度（390px）：每個分頁都不能出現橫向捲動。
+    await page.setViewport({ width: 390, height: 844 });
+    for (const tab of ['create', 'queue', 'library', 'models']) {
+      await showTab(page, tab);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      assert.ok(overflow <= 0, `${tab} 分頁在手機寬度橫向溢出 ${overflow}px`);
+    }
     return { customResolution: stored.resolution };
   } finally {
     await page.close();
@@ -435,6 +460,7 @@ async function runScenarioModulesScenario(browser, origin, managedOutputDir) {
   const results = [];
   try {
     await page.goto(origin, { waitUntil: 'networkidle0' });
+    await showTab(page, 'create');
     await page.waitForFunction(() => ['scenario-dance', 'scenario-runway', 'scenario-gym']
       .every((id) => [...document.querySelectorAll('#moduleSelect option')].some((option) => option.value === id)));
     for (const [index, scenario] of SCENARIO_MODULES.entries()) {

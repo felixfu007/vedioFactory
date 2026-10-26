@@ -11,7 +11,7 @@ import { renderLibrary } from './library.js';
 function setGeneratingState(isGenerating) {
   state.generating = isGenerating;
   ui.generateButton.disabled = isGenerating;
-  ui.generateButton.textContent = isGenerating ? '生成中…' : '生成影片';
+  ui.generateButton.textContent = isGenerating ? '示意動畫產生中…' : '產生示意動畫（不用 AI）';
 }
 
 export function gatherSpec(overrides = {}) {
@@ -100,7 +100,7 @@ async function generateVideoBlob(spec) {
 export async function createAndStoreVideo(spec, suffix = '') {
   const moduleDefinition = getModuleById(spec.moduleId);
   setGeneratingState(true);
-  setStatus(`正在使用 ${moduleDefinition.name} 生成影片…`);
+  setStatus(`正在產生「${moduleDefinition.name}」示意動畫（不用 AI，畫面不會照提示詞變化）…`);
   try {
     const blob = await generateVideoBlob(spec);
     const item = {
@@ -119,7 +119,7 @@ export async function createAndStoreVideo(spec, suffix = '') {
     }
     serializeLibrary();
     renderLibrary();
-    setStatus(`影片已完成：${item.fileName}`);
+    setStatus(`示意動畫已完成：${item.fileName}。要照提示詞產生真實影片，請按「用 AI 生成影片」。`);
     return item;
   } finally {
     setGeneratingState(false);
