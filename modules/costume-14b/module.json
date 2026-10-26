@@ -12,7 +12,7 @@
   ],
   "workflow": {
     "file": "workflow.json",
-    "description": "Wan 2.2 T2V 14B（fp8）高低雜訊雙模型＋ lightx2v 4 步加速，原生 16 FPS、最長 5 秒。",
+    "description": "Wan 2.2 T2V 14B（fp8）高低雜訊雙模型＋ lightx2v 4 步加速，原生 16 FPS、最長 10 秒。",
     "videoModelIds": [
       "wan-2.2-t2v-a14b"
     ],
@@ -31,7 +31,7 @@
       16
     ],
     "minDuration": 2,
-    "maxDuration": 5,
+    "maxDuration": 10,
     "name": "服裝造型影片（Wan 2.2 14B 文生影片）",
     "defaults": {
       "resolution": "480x832",

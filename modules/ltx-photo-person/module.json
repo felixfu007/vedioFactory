@@ -13,7 +13,7 @@
   ],
   "workflow": {
     "file": "workflow.json",
-    "description": "LTX 2.3 22B（NVFP4）兩段式生成並同時產生音訊，輸出附音訊 MP4；24 FPS、最長 5 秒。",
+    "description": "LTX 2.3 22B（NVFP4）兩段式生成並同時產生音訊，輸出附音訊 MP4；24 FPS、最長 20 秒。",
     "videoModelIds": [
       "ltx-2"
     ],
@@ -32,7 +32,7 @@
       24
     ],
     "minDuration": 2,
-    "maxDuration": 5,
+    "maxDuration": 20,
     "name": "照片人物動態（LTX 2.3 圖生影片＋音訊）",
     "defaults": {
       "resolution": "576x1024",

@@ -13,7 +13,7 @@
   ],
   "workflow": {
     "file": "workflow.json",
-    "description": "Wan 2.2 I2V 14B（fp8）高低雜訊雙模型＋ 4 步加速 LoRA＋ Squat Bounce 舞蹈 LoRA，16 FPS、最長 5 秒。",
+    "description": "Wan 2.2 I2V 14B（fp8）高低雜訊雙模型＋ 4 步加速 LoRA＋ Squat Bounce 舞蹈 LoRA，16 FPS、最長 10 秒。",
     "videoModelIds": [
       "wan-2.2-i2v-a14b"
     ],
@@ -32,7 +32,7 @@
       16
     ],
     "minDuration": 2,
-    "maxDuration": 5,
+    "maxDuration": 10,
     "name": "Squat Bounce 舞（Wan 2.2 圖生影片 14B）",
     "defaults": {
       "resolution": "480x832",
