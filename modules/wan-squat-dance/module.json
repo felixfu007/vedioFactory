@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "id": "wan-squat-dance",
+  "name": "Squat Bounce 舞（Wan 2.2 圖生影片 14B）",
+  "description": "以照片為第一格，搭配 Squat Bounce（Good Thing）舞蹈動作 LoRA，讓照片人物跳這段舞。照片最好拍到膝蓋以上或全身。動作不一定每次都成功，建議多試幾個 seed。可商用。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "舞蹈",
+    "照片",
+    "圖生影片",
+    "14B"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "Wan 2.2 I2V 14B（fp8）高低雜訊雙模型＋ 4 步加速 LoRA＋ Squat Bounce 舞蹈 LoRA，16 FPS、最長 5 秒。",
+    "videoModelIds": [
+      "wan-2.2-i2v-a14b"
+    ],
+    "requiresSourceImage": true,
+    "resolutions": [
+      "480x832",
+      "832x480",
+      "720x1280",
+      "1280x720"
+    ],
+    "allowCustomResolution": false,
+    "resolutionMultiple": 16,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      16
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "Squat Bounce 舞（Wan 2.2 圖生影片 14B）",
+    "defaults": {
+      "resolution": "480x832",
+      "fps": 16,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "name": "framing",
+      "label": "取景",
+      "type": "select",
+      "options": [
+        "she performs the g00dth1nk dance",
+        "camera zooms out to capture her full body while she performs the g00dth1nk dance"
+      ],
+      "default": "she performs the g00dth1nk dance",
+      "help": "照片只拍到上半身時，選第二個讓鏡頭拉遠看到全身。"
+    },
+    {
+      "name": "scene",
+      "label": "補充描述",
+      "type": "text",
+      "default": "動作流暢自然，保持人物長相與服裝和照片一致",
+      "help": "可留空。"
+    }
+  ],
+  "preset": {
+    "description": "Squat Bounce 舞，直式 5 秒。",
+    "promptTemplate": "{framing}, {scene}",
+    "storyTemplate": "照片中的人物跳 Squat Bounce 舞。",
+    "negativePrompt": "色調艷麗，過曝，靜態，細節模糊不清，字幕，浮水印，風格化，畫作，靜止不動，整體發灰，最差品質，低品質，JPEG 壓縮殘留，醜陋的，殘缺的，多餘的手指，畫得不好的手部，畫得不好的臉部，畸形的，毀容的，形態畸形的肢體，手指融合，雜亂的背景，三條腿，背景人很多，倒著走，兒童，未成年外觀",
+    "videoModelId": "wan-2.2-i2v-a14b",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "480x832",
+      "fps": 16,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 0
+    }
+  },
+  "example": {
+    "variables": {
+      "framing": "she performs the g00dth1nk dance",
+      "scene": "動作流暢自然，保持人物長相與服裝和照片一致"
+    },
+    "seed": 20261030
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "使用真人照片必須取得本人同意，且不得用於冒充、誤導或任何不雅內容；照片人物必須是成年人。"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "ltx-photo-person",
+  "name": "照片人物動態（LTX 2.3＋東亞臉部保真）",
+  "description": "以照片為第一格，用 LTX 2.3 產生附音訊的人物影片；搭配東亞臉部保真 LoRA，減少轉頭、側臉與環繞鏡頭時的臉部走樣。可商用。",
+  "version": "1.0.0",
+  "tags": [
+    "人物",
+    "照片",
+    "圖生影片",
+    "LTX",
+    "附音訊"
+  ],
+  "workflow": {
+    "file": "workflow.json",
+    "description": "LTX 2.3 22B（NVFP4）兩段式生成並同時產生音訊，輸出附音訊 MP4；24 FPS、最長 5 秒。",
+    "videoModelIds": [
+      "ltx-2"
+    ],
+    "requiresSourceImage": true,
+    "resolutions": [
+      "1024x576",
+      "576x1024",
+      "1280x704",
+      "704x1280"
+    ],
+    "allowCustomResolution": false,
+    "resolutionMultiple": 64,
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "fps": [
+      24
+    ],
+    "minDuration": 2,
+    "maxDuration": 5,
+    "name": "照片人物動態（LTX 2.3 圖生影片＋音訊）",
+    "defaults": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5
+    }
+  },
+  "fields": [
+    {
+      "name": "action",
+      "label": "動作",
+      "type": "select",
+      "options": [
+        "緩緩轉頭看向側面，再轉回來對鏡頭微笑",
+        "對鏡頭揮手打招呼並開心地笑",
+        "撥動頭髮後看向鏡頭"
+      ],
+      "default": "緩緩轉頭看向側面，再轉回來對鏡頭微笑"
+    },
+    {
+      "use": "movement",
+      "default": "鏡頭環繞人物"
+    },
+    {
+      "name": "sound",
+      "label": "聲音",
+      "type": "select",
+      "options": [
+        "輕柔的環境音",
+        "輕快的背景音樂",
+        "安靜無聲"
+      ],
+      "default": "輕柔的環境音"
+    }
+  ],
+  "preset": {
+    "description": "照片人物動態（LTX 2.3），直式 5 秒，附音訊。",
+    "promptTemplate": "照片中的人物{action}，{movement}，保持人物長相、髮型與服裝和照片一致，臉部自然穩定，真實攝影質感，{sound}",
+    "storyTemplate": "照片中的人物{action}。",
+    "negativePrompt": "pc game, console game, video game, cartoon, childish, ugly, 兒童，未成年外觀，字幕，浮水印，模糊，畸形的手，臉部變形",
+    "videoModelId": "ltx-2",
+    "seedMode": "random",
+    "settings": {
+      "resolution": "576x1024",
+      "fps": 24,
+      "duration": 5,
+      "quality": "premium",
+      "motion": 60,
+      "captionStrength": 0
+    }
+  },
+  "example": {
+    "variables": {
+      "action": "緩緩轉頭看向側面，再轉回來對鏡頭微笑",
+      "movement": "鏡頭環繞人物",
+      "sound": "輕柔的環境音"
+    },
+    "seed": 20261029
+  },
+  "safety": {
+    "requiresPersonConsent": true,
+    "notes": "使用真人照片必須取得本人同意，且不得用於冒充、誤導或任何不雅內容。"
+  }
+}

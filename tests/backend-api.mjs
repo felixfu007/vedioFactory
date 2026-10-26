@@ -215,8 +215,8 @@ async function main() {
     assert.equal(catalog.currentProjectStatus.inferenceScaffold.hasIntegratedModelWeights, false);
     assert.deepEqual(catalog.firstBatchOrder, ['sdxl', 'animatediff', 'realesrgan', 'rife']);
     assert.equal(catalog.models.some((model) => model.id === 'sdxl'), true);
-    assert.equal(catalog.videoModels.length, 11);
-    assert.deepEqual(catalog.videoModels.map((model) => model.priority), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert.equal(catalog.videoModels.length, 12);
+    assert.deepEqual(catalog.videoModels.map((model) => model.priority), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     assert.deepEqual(catalog.videoModels.slice(0, 3).map((model) => model.id), [
       'wan-2.2-ti2v-5b',
       'framepack-f1',
