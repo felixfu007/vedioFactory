@@ -138,6 +138,15 @@ PR #15 已合併（2026-10-25）。
 - [x] 「用 AI 生成影片」改為主要按鈕；原按鈕改名「產生示意動畫（不用 AI）」並移到虛線框的選用區塊，附說明；影片卡片標示「AI 影片」或「示意動畫（非 AI）」。
 - [x] 測試：視覺測試改為先切換分頁、新增 390px 手機寬度每個分頁不溢出檢查；修正原本寫死預設／工作流數量（加照片人物模組後失敗）的測試。`npm run test:all` 通過。
 
+## 14B 模型與影片增強模型（2026-10-26）
+
+- Civitai 金鑰已設定（.env，帳號 felixfu007613）。使用者裝的「maid classic」是 Krea 2 圖片 LoRA，與 Wan 不相容且禁止商用輸出。
+- 女僕 LoRA（Civitai 1932283，14B）標籤含 loli 且作者說明固定產生色情內容 → 不安裝；安裝器補上「標籤含 loli／shota 等也視為未成年」檢查（已提交）。
+- 新模組 `modules/costume-14b`（服裝造型 14B）：T2V 14B fp8 高低雜訊＋lightx2v 4 步 LoRA，16 FPS。實測兩名 20 歲日本女僕跳舞 832×480、81 幀，84 秒，最高 82°C，畫面正確（人物偏小、背景為宅邸外觀）。
+- 已下載並驗證 SHA-256：14B T2V 高／低（各 14.3 GB）、T2V 4 步 LoRA 高／低（各 1.2 GB）、RIFE v4.26（23 MB）、FILM（69 MB）、Real-ESRGAN x4plus（67 MB）、Stable Audio 3 small music（2.3 GB）＋ t5gemma 文字編碼器（1.2 GB）、Wan-Dancer global／local（各 18.3 GB）、I2V 480p 4 步 LoRA（0.7 GB）。
+- 實測後製：RIFE 補幀 16→32 FPS 只需 15 秒；補幀＋Real-ESRGAN 放大到 1664×960 需 264 秒，細節明顯變清晰。結果已放進影片庫。
+- 尚未整合進網站：後製（補幀／放大）、Stable Audio 配樂、Wan-Dancer（需起始圖＋音樂，一次 149 幀，顯存風險高）。
+
 ## 下一步候選（待規畫）
 
 - 拆分 `server.js`、`assets/app.js`（ES modules），降低維護成本。
