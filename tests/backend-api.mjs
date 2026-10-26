@@ -66,6 +66,7 @@ async function startMockCivitai() {
     101: model(101, { nsfw: true }),
     102: model(102, { poi: true }),
     107: model(107, { minor: true }),
+    108: model(108, { tags: ['cosplay', 'Loli'] }),
     103: model(103, {}, 'old-format.ckpt'),
     104: model(104),
     105: model(105, { allowCommercialUse: ['None'] }),
@@ -567,6 +568,7 @@ async function main() {
       ['https://civitai.com/images/5', 400, /看不懂/],
       ['https://civitai.com/models/102', 403, /真實人物/],
       ['https://civitai.com/models/107', 403, /未成年人/],
+      ['https://civitai.com/models/108', 403, /未成年人/],
       ['https://civitai.com/models/103', 400, /safetensors/],
       ['https://civitai.com/models/999', 404, /找不到/],
     ]) {
